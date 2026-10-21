@@ -56,6 +56,12 @@ Region: EU Frankfurt (deploy concern only).
 | `service_role` (Vercel server, Edge Functions) | Server RPCs; normal DML on tables (BYPASSRLS), except `audit_log` (SELECT only) and `baileys_auth_state` (none). |
 | table owner / others | `audit_log` UPDATE/DELETE/TRUNCATE blocked by trigger for every non-superuser role, even with privileges. |
 
+Allowlist single source (L6.1, L2.1): the send gate reads `accounts.use_case_policy.sender_allowlist`,
+which triggers keep derived from the enabled relay targets' `allowed_senders` (union, sorted): any
+target change (`allowed_senders`, `enabled`, insert/delete) re-derives it, and a direct write to
+`use_case_policy` cannot store a different list. An enabled target also sets `relay: true` and adds
+`agent_relay` to `allowed_use_cases`. The worker still merges `LIA_ALLOWLIST_SEED` (config) on top.
+
 `audit_log`: a BEFORE INSERT trigger takes an advisory xact lock, assigns `seq`, sets
 `prev_hash` = previous row's `hash` (genesis = 64 zeros) and `hash = sha256(jsonb_build_array(prev_hash,
 seq, org_id, actor_type, actor_id, action, target, host(ip), meta, at_utc)::text)`. `audit_verify_chain()`
@@ -122,7 +128,7 @@ Caller: **W** = `gateway_worker`, **S** = `service_role`, **U** = `authenticated
 | `request_session_command(p_account_id uuid, p_command text, p_requested_by uuid=null, p_via text='dashboard', p_ip inet=null)` | `uuid` | S | Dashboard Reconnect / MCP `session_reconnect`. Audited. |
 | `create_pairing_request(p_account_id uuid, p_requested_by uuid, p_method text='qr', p_phone_e164 text=null, p_ip inet=null)` | `uuid` | S | Cancels older requests + QR rows. Audited. |
 | `relay_set_target(p_account_id uuid, p_name text, p_url text, p_secret text=null, p_debounce_ms int=null, p_no_reply_threshold_min int=null, p_enabled bool=null, p_actor_user_id uuid=null, p_ip inet=null)` | `uuid` | S | Upsert by `(account_id, name)`. Secret → Vault. A changed URL or key resets `last_verified_at` to null (L5.5). Run the outbound URL guard before calling. Audited before/after (masked). |
-| `relay_allowlist_update(p_relay_target_id uuid, p_allowed_senders text[], p_actor_user_id uuid, p_confirmed bool, p_ip inet=null)` | `text[]` | S | Requires `p_confirmed=true`; E.164 only; audit row with before/after (L6.1). |
+| `relay_allowlist_update(p_relay_target_id uuid, p_allowed_senders text[], p_actor_user_id uuid, p_confirmed bool, p_ip inet=null)` | `text[]` | S | Requires `p_confirmed=true`; E.164 only; audit row with before/after (L6.1). The **only** way to change `relay_targets.allowed_senders` (a trigger rejects direct writes with 42501, even for service_role). |
 | `relay_record_test(p_relay_target_id uuid, p_result jsonb)` | `bool` | S | Stores `LiaTestResult`; `replied` sets `last_verified_at`. |
 | `relay_mark_replied(p_batch_id uuid, p_at timestamptz=null, p_message_id uuid=null)` | `bool` | S | Agent replied (send with `reply_to_id`). Test batch → channel verified. `p_message_id` links the reply (L4.6). |
 | `relay_mark_delivery_failed(p_batch_id uuid)` | `bool` | S | |

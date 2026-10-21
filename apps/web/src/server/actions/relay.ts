@@ -3,13 +3,13 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { e164ToJid, formatE164ForDisplay, toE164 } from '@htz/core';
-import { parseUseCasePolicy, validateOutboundUrl } from '@htz/policy';
+import { validateOutboundUrl } from '@htz/policy';
 import type { LiaTestResult } from '@htz/core';
 import { env } from '../env';
 import { requestIp, requireOwnerAal2 } from '../auth';
 import { serviceClient } from '../supabase';
 import { query, rpc } from '../db';
-import { getAccount, type AccountRow } from '../repo/accounts';
+import { getAccount } from '../repo/accounts';
 import { deliverRelayBatch } from '../internal';
 import type { Db } from '../supabase';
 import { TARGET_COLUMNS, toTargetView, type RelayTargetView, type TargetRow } from '../relay-view';
@@ -32,31 +32,6 @@ async function loadTarget(db: Db, id: string, orgId: string) {
   if (!r.ok) return fromGatewayError(r.error);
   if (!r.value || r.value.org_id !== orgId) return fail('not_found', GENERIC_HE.not_found);
   return okResult(r.value);
-}
-
-/**
- * The send gate reads `accounts.use_case_policy`; keep it in sync with the relay target so
- * Lia may only talk to allowlisted senders (relay=true, agent_relay allowed).
- */
-async function syncAccountRelayPolicy(db: Db, account: AccountRow, allowlist: string[]) {
-  const cur = parseUseCasePolicy(account.use_case_policy) ?? {
-    allowed_use_cases: [],
-    may_initiate: false,
-    sender_allowlist: [],
-    relay: false,
-  };
-  const next = {
-    ...cur,
-    relay: true,
-    allowed_use_cases: cur.allowed_use_cases.includes('agent_relay')
-      ? cur.allowed_use_cases
-      : [...cur.allowed_use_cases, 'agent_relay'],
-    sender_allowlist: allowlist,
-  };
-  return query(
-    db.from('accounts').update({ use_case_policy: next }).eq('id', account.id),
-    'accounts.sync_relay_policy',
-  );
 }
 
 const targetSchema = z.object({
@@ -139,8 +114,8 @@ export async function saveRelayTarget(input: {
     t = await loadTarget(db, id.value, auth.data.orgId);
     if (!t.ok) return t;
   }
-  const synced = await syncAccountRelayPolicy(db, acc.value, t.data.allowed_senders);
-  if (!synced.ok) return fromGatewayError(synced.error);
+  // accounts.use_case_policy (relay flag, agent_relay, sender_allowlist) is derived from the
+  // relay target by DB triggers: one source of truth for the send gate (L6.1).
   return okResult(toTargetView(t.data, acc.value.provider));
 }
 
@@ -195,8 +170,6 @@ export async function updateAllowlist(input: {
     p_ip: await requestIp(),
   });
   if (!r.ok) return fromGatewayError(r.error);
-  const acc = await getAccount(db, t.data.account_id);
-  if (acc.ok && acc.value) await syncAccountRelayPolicy(db, acc.value, r.value);
   return okResult({ applied: true, before: t.data.allowed_senders, after });
 }
 
