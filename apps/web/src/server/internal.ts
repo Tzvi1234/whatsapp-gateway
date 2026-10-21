@@ -7,7 +7,12 @@ import {
   routeInboundType,
 } from '@htz/relay';
 import { guardedFetch, type GuardedFetchOptions } from '@htz/policy';
-import { normalizeJid, type InboundType, type RelayMessage } from '@htz/core';
+import {
+  normalizeJid,
+  type InboundType,
+  type RelayMessage,
+  type RelayTranscriptEvent,
+} from '@htz/core';
 import type { CloudApiProvider } from '@htz/provider-cloud';
 import type { Db } from './supabase';
 import { isUuid, query, rpc } from './db';
@@ -106,7 +111,7 @@ export async function handleCloudSend(
 /* ================================================================== deliver (§4.7, S3) */
 
 export const deliverBody = z.object({
-  kind: z.enum(['relay', 'webhook']),
+  kind: z.enum(['relay', 'webhook', 'relay_followup']),
   id: z.uuid(),
   attempt: z.number().int().min(0).max(100),
 });
@@ -394,6 +399,96 @@ export async function deliverWebhook(
   return json(200, { ok: true, outcome: rec.value });
 }
 
+interface FollowupRow {
+  id: string;
+  batch_id: string;
+  relay_target_id: string;
+  message_id: string;
+  event: 'transcript';
+  transcript: string | null;
+  status: string;
+}
+
+/**
+ * Transcript follow-up for a relay batch (L3.4): `{event:'transcript', batch_id, message_id,
+ * transcript}`, signed like batches (same HMAC headers, same sender key, SSRF guard on every send).
+ * Idempotency-Key = follow-up id (stable across retries).
+ */
+export async function deliverRelayFollowup(
+  db: Db,
+  id: string,
+  opts: DeliverOptions = {},
+): Promise<Response> {
+  const now = opts.now ?? (() => new Date());
+  const f = await query<FollowupRow | null>(
+    db
+      .from('relay_followups')
+      .select('id, batch_id, relay_target_id, message_id, event, transcript, status')
+      .eq('id', id)
+      .maybeSingle(),
+    'relay_followups.get',
+  );
+  if (!f.ok) return json(503, { ok: false, code: 'internal' });
+  if (!f.value) return json(404, { ok: false, code: 'not_found' });
+  const fu = f.value;
+  if (fu.status === 'delivered' || fu.status === 'dead') {
+    return json(200, { ok: true, outcome: 'already_final', status: fu.status });
+  }
+  const t = await query<TargetRow | null>(
+    db
+      .from('relay_targets')
+      .select('id, url, secret_vault_id, enabled, no_reply_threshold_min')
+      .eq('id', fu.relay_target_id)
+      .maybeSingle(),
+    'relay_targets.get',
+  );
+  if (!t.ok) return json(503, { ok: false, code: 'internal' });
+  const target = t.value;
+
+  let httpStatus: number;
+  let error: string | null = null;
+  if (!target || !target.enabled || !target.secret_vault_id) {
+    httpStatus = 410;
+    error = 'target_disabled_or_missing';
+  } else {
+    const secret = await rpc<string | null>(db, 'vault_read_secret', {
+      p_id: target.secret_vault_id,
+    });
+    if (!secret.ok || !secret.value) return json(503, { ok: false, code: 'internal' });
+    const event: RelayTranscriptEvent = {
+      event: 'transcript',
+      batch_id: fu.batch_id,
+      message_id: fu.message_id,
+      transcript: fu.transcript,
+    };
+    const rawBody = JSON.stringify(event);
+    const headers = buildWebhookHeaders({
+      secret: secret.value,
+      rawBody,
+      idempotencyKey: fu.id,
+      nowSec: Math.floor(now().getTime() / 1000),
+    });
+    const send = opts.fetchImpl ?? guardedFetch;
+    const res = await send(
+      target.url,
+      { method: 'POST', headers, body: rawBody },
+      { ...opts.fetchOptions, allowedHosts: env().RELAY_ALLOWED_HOSTS },
+    );
+    if (res.ok) httpStatus = res.value.status;
+    else {
+      httpStatus = statusForFetchError(res.error.code);
+      error = `${res.error.code}:${res.error.detail ?? ''}`;
+    }
+  }
+  const rec = await rpc<string>(db, 'relay_followup_delivery_result', {
+    p_id: fu.id,
+    p_http_status: httpStatus,
+    p_error: error,
+  });
+  if (!rec.ok) return json(503, { ok: false, code: 'internal' });
+  return json(200, { ok: true, outcome: rec.value });
+}
+
 export async function handleDeliver(
   body: unknown,
   db: Db,
@@ -401,7 +496,12 @@ export async function handleDeliver(
 ): Promise<Response> {
   const p = deliverBody.safeParse(body);
   if (!p.success || !isUuid(p.data.id)) return json(400, { ok: false, code: 'invalid_input' });
-  return p.data.kind === 'relay'
-    ? deliverRelayBatch(db, p.data.id, opts)
-    : deliverWebhook(db, p.data.id, opts);
+  switch (p.data.kind) {
+    case 'relay':
+      return deliverRelayBatch(db, p.data.id, opts);
+    case 'relay_followup':
+      return deliverRelayFollowup(db, p.data.id, opts);
+    default:
+      return deliverWebhook(db, p.data.id, opts);
+  }
 }

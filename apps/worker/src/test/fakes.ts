@@ -237,6 +237,14 @@ export class FakeDb implements WorkerDb {
     this.#rec('createRelayBatch', ...a);
     return String(a[4]);
   }
+  async relayDeliveryFailed(...a: unknown[]) {
+    this.#rec('relayDeliveryFailed', ...a);
+    return true;
+  }
+  async relayTranscriptFollowup(...a: unknown[]) {
+    this.#rec('relayTranscriptFollowup', ...a);
+    return uuid();
+  }
   async workerLog(...a: unknown[]) {
     this.#rec('workerLog', ...a);
     return 1;

@@ -58,7 +58,11 @@ export interface RelayChannelDeps {
   debounceMs: number;
   db: Pick<
     WorkerDb,
-    'createRelayBatch' | 'setTranscript' | 'listPendingRelayMessages' | 'getConversation'
+    | 'createRelayBatch'
+    | 'setTranscript'
+    | 'listPendingRelayMessages'
+    | 'getConversation'
+    | 'relayTranscriptFollowup'
   >;
   /** The live session ops, null while disconnected. */
   session: () => RelaySessionOps | null;
@@ -280,15 +284,17 @@ export class RelayChannel {
   }
 
   #followUp(_thread: string, ev: RelayTranscriptEvent): void {
-    // The transcript is already stored via message_set_transcript. No worker-callable RPC exists to
-    // fan out a follow-up event (webhook_enqueue_event is service_role-only): logged for the server.
-    this.#d.log.info(
-      {
-        correlation_id: ev.batch_id,
-        message: ev.message_id,
-        has_transcript: ev.transcript !== null,
-      },
-      'relay_transcript_followup',
+    // L3.4: the batch already went out with transcript:null → the deliverer POSTs a follow-up
+    // event with the same message_id (signed like batches), also after Lia already replied.
+    this.#track(
+      this.#d.db
+        .relayTranscriptFollowup(ev.batch_id, ev.message_id, ev.transcript)
+        .then(() =>
+          this.#d.log.info(
+            { correlation_id: ev.batch_id, has_transcript: ev.transcript !== null },
+            'relay_transcript_followup_queued',
+          ),
+        ),
     );
   }
 }

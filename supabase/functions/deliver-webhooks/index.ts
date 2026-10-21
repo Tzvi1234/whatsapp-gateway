@@ -1,6 +1,7 @@
 // deliver-webhooks: invoked every minute by pg_cron (job gw-deliver-webhooks) when deliveries
 // are due, and kicked right after inserts into relay_batches / webhook_deliveries (ARCH §4.7).
-// Claims due relay batches (agent relay, e.g. Lia) and generic webhook deliveries and hands
+// Claims due relay batches (agent relay, e.g. Lia), their transcript follow-ups and generic
+// webhook deliveries and hands
 // each to Vercel (/api/internal/deliver), which signs (HMAC t=,v1=), applies the outbound URL
 // guard, POSTs, and records the result via relay_batch_delivery_result / webhook_delivery_result.
 // If Vercel is unreachable nothing is recorded: the 60 s lease expires and the item is
@@ -10,8 +11,8 @@
 import { isAuthorizedCron, json, mapLimit, postInternal, rpc } from '../_shared/runtime.ts';
 
 interface ClaimedDelivery {
-  kind: 'relay' | 'webhook';
-  id: string; // relay: batch_id; webhook: webhook_deliveries.id
+  kind: 'relay' | 'webhook' | 'relay_followup';
+  id: string; // relay: batch_id; webhook: webhook_deliveries.id; relay_followup: relay_followups.id
   attempt: number;
 }
 

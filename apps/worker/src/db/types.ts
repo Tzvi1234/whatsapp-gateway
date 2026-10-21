@@ -303,6 +303,14 @@ export interface WorkerDb {
     isTest: boolean,
     batchId: string,
   ): Promise<string>; // worker_create_relay_batch
+  /** L4.6: Lia's reply (this outbound message) could not be delivered. */
+  relayDeliveryFailed(messageId: string): Promise<boolean>; // worker_relay_delivery_failed
+  /** L3.4: transcript finished after its batch was posted → follow-up event to the relay target. */
+  relayTranscriptFollowup(
+    batchId: string,
+    messageId: string,
+    transcript: string | null,
+  ): Promise<string>; // worker_relay_transcript_followup
   workerLog(orgId: string, workerId: string, entries: WorkerLogEntry[]): Promise<number>; // worker_log
   auditAppend(
     orgId: string,

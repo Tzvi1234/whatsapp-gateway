@@ -17,10 +17,17 @@ WhatsApp, and the local `gateway-transcriber` unix socket.
 | `src/db/` | `WorkerDb`: one method per worker RPC / RLS select (`supabase-db.ts`), `baileys_auth_state` adapter (`auth-state-db.ts`, bytea `\x…` ↔ bytes), Realtime wake-ups (`realtime.ts`). |
 | `src/session/` | `SessionManager`: per-account lease (`worker_try_lock_account`, renewed every 25 s, refused → socket closed), session events, commands, pairing (QR / pairing code). `accounts.ts`: policy/capabilities/relay allowlist per account. |
 | `src/queue/` | `QueueProcessor`: `claim_jobs` → RL2 check → **send gate** → session check → pacing → send → `complete_job`/`fail_job`. Realtime INSERT wake-up + 30-60 s poll. `outbox.ts`: replies the worker originates are enqueued, never sent directly. |
-| `src/inbound/` | `InboundPipeline` (status posts, contacts, sender guard, media → Storage, `ingest_inbound`, routing), `RelayChannel` (Debouncer, presence, transcription, restart recovery, `worker_create_relay_batch`), `StatusReplies` (status-reply automations). |
+| `src/inbound/` | `InboundPipeline` (status posts, contacts, sender guard, media → Storage, `ingest_inbound`, routing), `RelayChannel` (Debouncer, presence, transcription, restart recovery, `worker_create_relay_batch`, late transcripts → `worker_relay_transcript_followup`), `StatusReplies` (status-reply automations). |
 | `src/transcribe/` | `LocalTranscriber` (unix socket), `SonioxTranscriber` (only constructed with `SONIOX_ENABLED=true` **and** a key). |
 | `src/heartbeat/` | `record_heartbeat` every 60 s; `LogShipper` (pino → stdout + batched `worker_log`, already redacted). |
 | `src/shutdown.ts` | SIGTERM: stop claiming → finish in-flight job → close sockets **without logout** → release locks → flush logs. |
+
+Relay facts the worker owns (L4.6, L3.4): a Lia reply whose job goes `dead` is reported with
+`worker_relay_delivery_failed(message_id)` (batch → `delivery_failed`, audited); a transcript that
+finishes after its batch was posted becomes a `relay_followups` row via
+`worker_relay_transcript_followup(batch_id, message_id, transcript)`, which the server-side deliverer
+POSTs to the relay target as `{event:'transcript', batch_id, message_id, transcript}` (signed like
+batches).
 
 Send path invariant (TEST-PLAN S13): every message the worker puts on the wire goes through
 `QueueProcessor`, which calls the shared `SendGate` (`@htz/policy`) with an entry point derived from
@@ -100,10 +107,6 @@ network, no sockets, fictitious numbers.
 
 ## Known gaps (need DB/server changes, not worker code)
 
-- `relay_mark_delivery_failed` and `webhook_enqueue_event` are granted to `service_role` only. The
-  worker records Lia-reply delivery failures (L4.6) as `audit_log` action `relay.delivery_failed`
-  and transcript follow-ups (L3.4) as a `relay_transcript_followup` log line; the server must turn
-  those into the canonical status / follow-up event.
 - No Storage bucket/policy for `gateway_worker` exists in the migrations yet: media upload/download
   fails (logged as `media_store_failed`) until a private `media` bucket with worker insert/select
   policies is created.

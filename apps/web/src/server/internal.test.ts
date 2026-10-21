@@ -10,7 +10,7 @@ let current = fake.createFakeDb();
 vi.mock('./supabase', () => ({ serviceClient: () => current.db }));
 
 const { setEnvForTests } = await import('./env');
-const { deliverRelayBatch, handleCloudSend } = await import('./internal');
+const { deliverRelayBatch, deliverRelayFollowup, handleCloudSend } = await import('./internal');
 const cloudSendRoute = await import('../app/api/internal/cloud-send/route');
 const deliverRoute = await import('../app/api/internal/deliver/route');
 
@@ -211,6 +211,99 @@ describe('deliver relay batch (S3, L4.7, L4.9)', () => {
     });
     // S7: the sender key never appears in what we return
     expect(await res.text()).not.toContain(RELAY_SECRET);
+  });
+});
+
+describe('deliver relay transcript follow-up (L3.4)', () => {
+  const FU = '12121212-1212-4121-8121-121212121212';
+  function followupDb(status = 'pending') {
+    return fake.createFakeDb({
+      rpc: {
+        vault_read_secret: () => ({ data: RELAY_SECRET }),
+        relay_followup_delivery_result: (a) => ({
+          data: a.p_http_status === 200 ? 'delivered' : 'failed',
+        }),
+      },
+      table: (op) => {
+        if (op.table === 'relay_followups') {
+          return {
+            data: {
+              id: FU,
+              batch_id: BATCH,
+              relay_target_id: TARGET,
+              message_id: MSG,
+              event: 'transcript',
+              transcript: 'תמליל מאוחר',
+              status,
+            },
+          };
+        }
+        if (op.table === 'relay_targets') {
+          return {
+            data: {
+              id: TARGET,
+              url: 'https://hooks.grok.example.test/lia/webhook',
+              secret_vault_id: '77777777-7777-4777-8777-777777777777',
+              enabled: true,
+              no_reply_threshold_min: 10,
+            },
+          };
+        }
+        return { data: null };
+      },
+    });
+  }
+
+  it('L3.4 POSTs {event:transcript, batch_id, message_id, transcript} signed like batches', async () => {
+    const f = followupDb();
+    const { request, calls } = fakeRequest(200);
+    const now = new Date('2026-10-21T12:01:00Z');
+    const res = await deliverRelayFollowup(f.db, FU, {
+      now: () => now,
+      fetchOptions: { resolver: async () => ['93.184.216.34'], request },
+    });
+    expect(res.status).toBe(200);
+    expect(calls).toHaveLength(1);
+    const { options, body } = calls[0]!;
+    const headers = options.headers as Record<string, string>;
+    expect(headers['Idempotency-Key']).toBe(FU);
+    expect(
+      verifyWebhookSignature(headers['X-Gateway-Signature'], body, [RELAY_SECRET], 1792584060).ok,
+    ).toBe(true);
+    expect(JSON.parse(body)).toEqual({
+      event: 'transcript',
+      batch_id: BATCH,
+      message_id: MSG,
+      transcript: 'תמליל מאוחר',
+    });
+    expect(f.calledRpc('relay_followup_delivery_result')[0]!.args).toMatchObject({
+      p_id: FU,
+      p_http_status: 200,
+    });
+  });
+
+  it('L3.4 routed through /api/internal/deliver kind relay_followup; final rows not re-sent', async () => {
+    current = followupDb('delivered');
+    const res = await deliverRoute.POST(
+      new Request('https://gateway.example.test/api/internal/deliver', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-internal-secret': SECRET },
+        body: JSON.stringify({ kind: 'relay_followup', id: FU, attempt: 0 }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ outcome: 'already_final' });
+    expect(current.calledRpc('relay_followup_delivery_result')).toHaveLength(0);
+  });
+
+  it('S3 guard applies to follow-ups too', async () => {
+    const f = followupDb();
+    const { request, calls } = fakeRequest();
+    await deliverRelayFollowup(f.db, FU, {
+      fetchOptions: { resolver: async () => ['10.0.0.5'], request },
+    });
+    expect(calls).toHaveLength(0);
+    expect(f.calledRpc('relay_followup_delivery_result')[0]!.args.p_http_status).toBe(400);
   });
 });
 

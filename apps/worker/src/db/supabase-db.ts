@@ -303,6 +303,16 @@ export function createSupabaseWorkerDb(client: SupabaseClient): WorkerDb {
         p_is_test: isTest,
         p_batch_id: batchId,
       }),
+    relayDeliveryFailed: async (messageId) =>
+      Boolean(
+        await rpc<boolean | null>('worker_relay_delivery_failed', { p_message_id: messageId }),
+      ),
+    relayTranscriptFollowup: (batchId, messageId, transcript) =>
+      rpc<string>('worker_relay_transcript_followup', {
+        p_batch_id: batchId,
+        p_message_id: messageId,
+        p_transcript: transcript,
+      }),
     workerLog: (orgId, workerId, entries: WorkerLogEntry[]) =>
       rpc<number>('worker_log', { p_org_id: orgId, p_worker_id: workerId, p_entries: entries }),
     auditAppend: (orgId, workerId, action, target, meta) =>

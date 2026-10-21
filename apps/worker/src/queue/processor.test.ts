@@ -146,16 +146,19 @@ describe('QueueProcessor', () => {
     expect(sent[0]?.to).toBe(TZVI_LID);
   });
 
-  it('session down → transient session_disconnected; needs_relink → permanent + relay delivery_failed audit (L4.6)', async () => {
+  it('L4.6 session down → transient session_disconnected; needs_relink → permanent + relay batch delivery_failed', async () => {
     const a = setup({ state: 'connecting' });
     expect(await a.processor.process(job())).toBe('rescheduled');
     expect(a.db.callsOf('failJob')[0]?.slice(1, 3)).toEqual(['session_disconnected', true]);
     expect(a.provider.send).not.toHaveBeenCalled();
 
     const b = setup({ state: 'needs_relink' });
-    expect(await b.processor.process(job())).toBe('failed');
+    const j = job();
+    expect(await b.processor.process(j)).toBe('failed');
     expect(b.db.callsOf('failJob')[0]?.slice(1, 3)).toEqual(['needs_relink', false]);
-    expect(b.db.callsOf('auditAppend')[0]?.[2]).toBe('relay.delivery_failed');
+    // L4.6: the worker itself marks the batch delivery_failed via its own RPC (no audit workaround).
+    expect(b.db.callsOf('relayDeliveryFailed')[0]).toEqual([j.message_id]);
+    expect(b.db.callsOf('auditAppend')).toHaveLength(0);
   });
 
   it('pacing waits are chunked with lease renewals; a lost lease aborts before sending', async () => {

@@ -222,6 +222,33 @@ describe('RelayChannel (L3)', () => {
     expect(t.media.upload).not.toHaveBeenCalled(); // nothing deleted/overwritten; audio stays where ingest put it
   });
 
+  it('L3.4 transcript over the 30 s cap → batch goes with transcript null, then a follow-up event with the same message_id', async () => {
+    let finish: (v: {
+      text: string;
+      durationS: number;
+      elapsedMs: number;
+      backend: string;
+    }) => void = () => undefined;
+    const t = setup(() => new Promise((r) => (finish = r)));
+    const voice = msg({
+      type: 'voice',
+      voiceSeconds: 40,
+      audio: { bytes: new Uint8Array([1]), mime: 'audio/ogg' },
+    });
+    t.ch.accept(voice);
+    await vi.advanceTimersByTimeAsync(35_000);
+    await vi.advanceTimersByTimeAsync(0);
+    const batch = t.db.callsOf('createRelayBatch')[0];
+    expect(batch?.[1]).toEqual([voice.messageId]);
+    expect(t.db.callsOf('relayTranscriptFollowup')).toHaveLength(0);
+    finish({ text: 'תמליל', durationS: 40, elapsedMs: 1, backend: 'fake' });
+    await vi.advanceTimersByTimeAsync(0);
+    await t.ch.drain();
+    expect(t.db.callsOf('relayTranscriptFollowup')).toEqual([
+      [batch?.[4], voice.messageId, 'תמליל'],
+    ]);
+  });
+
   it('L3.5 voice >60 s: Gateway replies "receiving, transcribing" once per batch; Lia woken only when the transcript is ready', async () => {
     let finish: (v: {
       text: string;

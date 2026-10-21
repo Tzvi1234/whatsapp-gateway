@@ -13,7 +13,9 @@ create schema extensions;
 create extension pgcrypto with schema extensions;
 create extension pgtap with schema extensions;
 grant usage on schema extensions to public;
-alter database gw_test set search_path = "$user", public, extensions;
+do $$ begin
+  execute format('alter database %I set search_path = "$user", public, extensions', current_database());
+end $$;
 set search_path = "$user", public, extensions;
 
 -- auth

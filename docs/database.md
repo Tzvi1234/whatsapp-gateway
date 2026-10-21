@@ -35,7 +35,8 @@ Region: EU Frankfurt (deploy concern only).
 | `automations`, `automation_cooldowns`, `statuses`, `reply_jobs` | Status-reply automations; cooldown unique `(account_id, provider_status_id, contact_key)` = one reply per contact per status |
 | `reminders` | `state` incl. `unconfigured`; idx `(state, due_at)` |
 | `relay_targets` | `url` (https), Vault secret + last4, `debounce_ms` 3000-5000 (default 4000), `no_reply_threshold_min` in (5,10,30) default 10, `allowed_senders` (E.164 CHECK), `last_verified_at` (null = "untested"), `last_test` (status CHECK) |
-| `relay_batches` | `batch_id` unique (Idempotency-Key), `message_ids uuid[]`, `status` CHECK = exactly the 6 canonical values (null = not delivered yet), `is_test`, `attempts`, `accepted_at`, `first_response_at`, `replied_at` |
+| `relay_batches` | `batch_id` unique (Idempotency-Key), `message_ids uuid[]`, `status` CHECK = exactly the 6 canonical values (null = not delivered yet), `is_test`, `attempts`, `accepted_at`, `first_response_at`, `replied_at`, `reply_message_id` (Lia's reply, set by `relay_mark_replied`) |
+| `relay_followups` | Transcript follow-up events (L3.4) to the relay target: unique `(batch_id, message_id, event)`, `transcript` (null = failed), `status` pending/delivered/failed/dead, retries like webhooks; delivered only after the batch itself; finished rows purged after 7 days |
 | `webhook_endpoints`, `webhook_deliveries` | Generic signed webhooks; retries 10s,30s,2m,10m,30m,2h then dead |
 | `api_clients` | `key_prefix` unique, `key_hash` (sha256 hex CHECK), `scopes` ⊆ Scope, `account_ids`, `conversation_ids` (CHECK: `relay` ⇒ non-null and non-empty), `rate_limit`, `expires_at`, `revoked_at`, `last_used_at`, `legacy` |
 | `audit_log` | Append-only, hash-chained (`seq`, `prev_hash`, `hash`) |
@@ -97,6 +98,8 @@ Caller: **W** = `gateway_worker`, **S** = `service_role`, **U** = `authenticated
 | `worker_take_cooldown(p_account_id uuid, p_provider_status_id text, p_contact_key text, p_automation_id uuid=null, p_status_id uuid=null)` | `bool` (true = first) | W | One reply per contact per status. |
 | `worker_record_reply_job(p_account_id uuid, p_outcome text, p_automation_id uuid=null, p_status_id uuid=null, p_inbound_message_id uuid=null, p_outbound_message_id uuid=null, p_contact_key text=null, p_detail text=null)` | `uuid` | W | Outcomes: queued/sent/failed/skipped_*. |
 | `worker_create_relay_batch(p_relay_target_id uuid, p_message_ids uuid[], p_conversation_id uuid=null, p_is_test bool=false, p_batch_id uuid=null)` | `uuid` batch_id | W | Idempotent on `batch_id`; marks messages `relay_state='batched'`; kicks `deliver-webhooks`. |
+| `worker_relay_delivery_failed(p_message_id uuid)` | `bool` | W | L4.6: the (failed, outbound, Baileys) message is the linked reply of a batch → batch `delivery_failed`; audited `relay.delivery_failed`. 55000 if the message did not fail. |
+| `worker_relay_transcript_followup(p_batch_id uuid, p_message_id uuid, p_transcript text=null)` | `uuid` followup id | W | L3.4: idempotent per (batch, message); the message must be in the batch. Kicks `deliver-webhooks`. |
 | `worker_log(p_org_id uuid, p_worker_id text, p_entries jsonb)` | `int` | W | `[{level,msg,correlation_id,data,at}]`, already redacted. |
 | `audit_append(p_org_id uuid, p_actor_type text, p_actor_id text, p_action text, p_target text=null, p_ip inet=null, p_meta jsonb='{}')` | `uuid` | W, S | The only write path into `audit_log`. |
 
@@ -121,10 +124,12 @@ Caller: **W** = `gateway_worker`, **S** = `service_role`, **U** = `authenticated
 | `relay_set_target(p_account_id uuid, p_name text, p_url text, p_secret text=null, p_debounce_ms int=null, p_no_reply_threshold_min int=null, p_enabled bool=null, p_actor_user_id uuid=null, p_ip inet=null)` | `uuid` | S | Upsert by `(account_id, name)`. Secret → Vault. A changed URL or key resets `last_verified_at` to null (L5.5). Run the outbound URL guard before calling. Audited before/after (masked). |
 | `relay_allowlist_update(p_relay_target_id uuid, p_allowed_senders text[], p_actor_user_id uuid, p_confirmed bool, p_ip inet=null)` | `text[]` | S | Requires `p_confirmed=true`; E.164 only; audit row with before/after (L6.1). |
 | `relay_record_test(p_relay_target_id uuid, p_result jsonb)` | `bool` | S | Stores `LiaTestResult`; `replied` sets `last_verified_at`. |
-| `relay_mark_replied(p_batch_id uuid, p_at timestamptz=null)` | `bool` | S | Agent replied (send with `reply_to_id`). Test batch → channel verified. |
+| `relay_mark_replied(p_batch_id uuid, p_at timestamptz=null, p_message_id uuid=null)` | `bool` | S | Agent replied (send with `reply_to_id`). Test batch → channel verified. `p_message_id` links the reply (L4.6). |
 | `relay_mark_delivery_failed(p_batch_id uuid)` | `bool` | S | |
 | `relay_resend_batch(p_batch_id uuid)` | `bool` | S | Same `batch_id` / `message_ids`. |
-| `claim_deliveries(p_worker_id text, p_n int=20)` | `table(kind 'webhook'\|'relay', id, attempt)` | S | `id` = delivery id or `batch_id`; 60 s lease. |
+| `claim_deliveries(p_worker_id text, p_n int=20)` | `table(kind 'webhook'\|'relay'\|'relay_followup', id, attempt)` | S | `id` = delivery id, `batch_id` or follow-up id; 60 s lease. Follow-ups only once their batch has a status. |
+| `relay_followup_delivery_result(p_id uuid, p_http_status int, p_error text=null)` | `text` delivered/failed/dead | S | 2xx delivered; 0/408/429/5xx retried (webhook backoff); other 4xx or 6th attempt → dead. |
+| `relay_followups_purge(p_days int=7)` | `int` | S, cron | Deletes delivered/dead follow-ups (they carry transcripts, S11). |
 | `relay_batch_delivery_result(p_batch_id uuid, p_http_status int, p_error text=null)` | `text` | S | 2xx accepted; 401/403 rejected_key; 0/408/429/5xx retried then unreachable; other 4xx unreachable. Use 0 for network/timeout. |
 | `webhook_delivery_result(p_id uuid, p_response_code int, p_error text=null)` | `text` | S | delivered / failed (retry) / dead + alert. |
 | `relay_evaluate_no_reply()` | `int` | S, cron | accepted past threshold → `no_reply` + alert. |
@@ -153,6 +158,7 @@ Caller: **W** = `gateway_worker`, **S** = `service_role`, **U** = `authenticated
 | `gw-relay-no-reply` | every minute | `relay_evaluate_no_reply()` (SQL only) |
 | `gw-pairing-purge` | every minute | `pairing_purge_expired()` (SQL only) |
 | `gw-retention` | daily 02:17 UTC | `retention_run()` (SQL only) |
+| `gw-relay-followups-purge` | daily 02:23 UTC | `relay_followups_purge()` (SQL only) |
 
 One-time Vault setup per project (SQL editor):
 ```sql
@@ -166,7 +172,7 @@ Edge Function env (`supabase secrets set ...`; `SUPABASE_URL`/`SUPABASE_SERVICE_
 |---|---|
 | all | `EDGE_CRON_SECRET` (= Vault `edge_cron_secret`) |
 | `heartbeat-alert` | `ALERT_EMAIL_API_KEY`, `ALERT_EMAIL_TO` (comma-separated; Tzvi's Gmail, never in the repo), `ALERT_EMAIL_FROM`, optional `ALERT_EMAIL_API_URL` (Resend-compatible, default `https://api.resend.com/emails`). Missing → dry-run (logs only). |
-| `cloud-retry`, `deliver-webhooks` | `PUBLIC_BASE_URL`, `INTERNAL_API_SECRET` → `POST /api/internal/cloud-send` `{job_id, message_id, account_id, attempt, lease_until}` and `POST /api/internal/deliver` `{kind, id, attempt}` with header `x-internal-secret`. Vercel performs the Graph call / HMAC-signed POST and records the result with `complete_job`/`fail_job` and `relay_batch_delivery_result`/`webhook_delivery_result`. |
+| `cloud-retry`, `deliver-webhooks` | `PUBLIC_BASE_URL`, `INTERNAL_API_SECRET` → `POST /api/internal/cloud-send` `{job_id, message_id, account_id, attempt, lease_until}` and `POST /api/internal/deliver` `{kind: 'relay'\|'webhook'\|'relay_followup', id, attempt}` with header `x-internal-secret`. Vercel performs the Graph call / HMAC-signed POST and records the result with `complete_job`/`fail_job` and `relay_batch_delivery_result`/`webhook_delivery_result`. |
 
 ## 7. Retention (S11, L6.4)
 

@@ -158,6 +158,7 @@ begin
     tests.id('owner_a'), null);
   update public.relay_targets set id = tests.id('target_a') where account_id = acc and name = 'Lia';
   v_batch := public.worker_create_relay_batch(tests.id('target_a'), array[v_in], v_conv, false, null);
+  perform public.worker_relay_transcript_followup(v_batch, v_in, 'fixture transcript');
 
   insert into public.webhook_endpoints (id, org_id, url, events)
   values (tests.id('endpoint_a'), oa, 'https://hooks.example.test/generic', array['message.received']);

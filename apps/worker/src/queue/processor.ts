@@ -29,7 +29,12 @@ export const STATUS_REPLY_KEY_PREFIX = 'status-reply:';
 export interface QueueDeps {
   db: Pick<
     WorkerDb,
-    'claimJobs' | 'renewLease' | 'completeJob' | 'failJob' | 'getConversation' | 'auditAppend'
+    | 'claimJobs'
+    | 'renewLease'
+    | 'completeJob'
+    | 'failJob'
+    | 'getConversation'
+    | 'relayDeliveryFailed'
   >;
   gate: SendGate;
   provider: Pick<WhatsAppProvider, 'send' | 'setPresence'>;
@@ -147,21 +152,9 @@ export class QueueProcessor {
     const state = await this.#d.db.failJob(job.job_id, code, transient, detail);
     log.warn({ code, transient, state }, 'job_failed');
     if (state === 'dead' && entry === 'relay.reply') {
-      // L4.6: Lia replied but the reply could not be delivered to Tzvi. relay_mark_delivery_failed
-      // is service_role-only, so the worker records it in the audit log for the server to act on.
-      await this.#d.db
-        .auditAppend(
-          this.#d.orgId,
-          this.#d.workerId,
-          'relay.delivery_failed',
-          `message:${job.message_id}`,
-          {
-            code,
-            quoted_provider_id_present: job.quoted_provider_id !== null,
-          },
-        )
-        .catch(() => undefined);
-      log.error({ code }, 'relay_delivery_failed');
+      // L4.6: Lia replied but the reply could not be delivered to Tzvi → batch delivery_failed.
+      const marked = await this.#d.db.relayDeliveryFailed(job.message_id).catch(() => false);
+      log.error({ code, batch_marked: marked }, 'relay_delivery_failed');
     }
     return transient && state !== 'dead' ? 'rescheduled' : 'failed';
   }

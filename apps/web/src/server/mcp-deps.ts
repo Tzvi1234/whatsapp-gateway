@@ -480,9 +480,10 @@ export function createMcpDeps(opts: McpDepsOptions = {}): McpDeps {
 
         if (relayBatchId && !res.value.duplicate) {
           const failed = res.value.row.status === 'failed';
+          // The reply message is linked so the worker can report a later failed delivery (L4.6).
           await rpc(db, failed ? 'relay_mark_delivery_failed' : 'relay_mark_replied', {
             p_batch_id: relayBatchId,
-            ...(failed ? {} : { p_at: now().toISOString() }),
+            ...(failed ? {} : { p_at: now().toISOString(), p_message_id: res.value.row.id }),
           });
         }
         return ok({ message: toMessageView(res.value.row), duplicate: res.value.duplicate });
