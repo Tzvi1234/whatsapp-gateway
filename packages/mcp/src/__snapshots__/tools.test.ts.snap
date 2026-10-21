@@ -1,0 +1,939 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`tool catalogue > R3.1 tools/list is frozen (snapshot) 1`] = `
+[
+  {
+    "description": "List status-reply automations.",
+    "inputSchema": {
+      "properties": {
+        "account": {
+          "description": "Account id or alias. Omitted: the migration alias \`default\` (Baileys) or \`meta-default\` (Cloud API).",
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+        "enabled": {
+          "type": "boolean",
+        },
+      },
+      "type": "object",
+    },
+    "name": "list_automations",
+  },
+  {
+    "description": "Create a status-reply automation (keyword → reply, up to 10 options).",
+    "inputSchema": {
+      "properties": {
+        "account": {
+          "description": "Account id or alias. Omitted: the migration alias \`default\` (Baileys) or \`meta-default\` (Cloud API).",
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+        "bind_next_status": {
+          "default": false,
+          "type": "boolean",
+        },
+        "case_sensitive": {
+          "default": false,
+          "type": "boolean",
+        },
+        "enabled": {
+          "default": true,
+          "type": "boolean",
+        },
+        "ignore_emoji": {
+          "default": true,
+          "type": "boolean",
+        },
+        "keyword": {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string",
+        },
+        "match": {
+          "default": "contains",
+          "enum": [
+            "exact",
+            "contains",
+          ],
+          "type": "string",
+        },
+        "media_url": {
+          "anyOf": [
+            {
+              "maxLength": 2048,
+              "pattern": "^https:\\/\\/[^\\s]+$",
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
+          ],
+        },
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+        "options": {
+          "default": [],
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string",
+          },
+          "maxItems": 10,
+          "type": "array",
+        },
+        "reply_text": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string",
+        },
+        "status_id": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
+          ],
+        },
+      },
+      "required": [
+        "name",
+        "keyword",
+        "reply_text",
+      ],
+      "type": "object",
+    },
+    "name": "create_automation",
+  },
+  {
+    "description": "Update fields of an automation.",
+    "inputSchema": {
+      "properties": {
+        "account": {
+          "description": "Account id or alias. Omitted: the migration alias \`default\` (Baileys) or \`meta-default\` (Cloud API).",
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+        "bind_next_status": {
+          "type": "boolean",
+        },
+        "case_sensitive": {
+          "type": "boolean",
+        },
+        "enabled": {
+          "type": "boolean",
+        },
+        "id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string",
+        },
+        "ignore_emoji": {
+          "type": "boolean",
+        },
+        "keyword": {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string",
+        },
+        "match": {
+          "enum": [
+            "exact",
+            "contains",
+          ],
+          "type": "string",
+        },
+        "media_url": {
+          "anyOf": [
+            {
+              "maxLength": 2048,
+              "pattern": "^https:\\/\\/[^\\s]+$",
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
+          ],
+        },
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+        "options": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string",
+          },
+          "maxItems": 10,
+          "type": "array",
+        },
+        "reply_text": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string",
+        },
+        "status_id": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
+          ],
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "update_automation",
+  },
+  {
+    "description": "Delete an automation.",
+    "inputSchema": {
+      "properties": {
+        "account": {
+          "description": "Account id or alias. Omitted: the migration alias \`default\` (Baileys) or \`meta-default\` (Cloud API).",
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+        "id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "delete_automation",
+  },
+  {
+    "description": "Send a text message. Use client_msg_id for idempotency.",
+    "inputSchema": {
+      "properties": {
+        "account": {
+          "description": "Account id or alias. Omitted: the migration alias \`default\` (Baileys) or \`meta-default\` (Cloud API).",
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+        "client_msg_id": {
+          "description": "Idempotency key: the same value twice returns the first result without a second send.",
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string",
+        },
+        "reply_to_id": {
+          "description": "Message id to quote/reply to.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string",
+        },
+        "text": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string",
+        },
+        "to": {
+          "description": "Recipient: E.164 / Israeli local number or WhatsApp JID.",
+          "maxLength": 100,
+          "minLength": 3,
+          "type": "string",
+        },
+        "use_case": {
+          "description": "Use case; defaults to the account's default.",
+          "enum": [
+            "reminders",
+            "notifications",
+            "customer_service",
+            "bookings",
+            "agent_relay",
+            "status_automation",
+          ],
+          "type": "string",
+        },
+        "wait": {
+          "default": false,
+          "description": "Wait up to ~5s for the message to reach status \`sent\`.",
+          "type": "boolean",
+        },
+      },
+      "required": [
+        "to",
+        "text",
+      ],
+      "type": "object",
+    },
+    "name": "send_message",
+  },
+  {
+    "description": "Edit the text of an outbound message sent earlier.",
+    "inputSchema": {
+      "properties": {
+        "account": {
+          "description": "Account id or alias. Omitted: the migration alias \`default\` (Baileys) or \`meta-default\` (Cloud API).",
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+        "message_id": {
+          "description": "Id of an outbound message sent earlier.",
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string",
+        },
+        "text": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "message_id",
+        "text",
+      ],
+      "type": "object",
+    },
+    "name": "update_reply",
+  },
+  {
+    "description": "Recent messages of a chat (newest first).",
+    "inputSchema": {
+      "properties": {
+        "account": {
+          "description": "Account id or alias. Omitted: the migration alias \`default\` (Baileys) or \`meta-default\` (Cloud API).",
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+        "chat": {
+          "description": "Chat: phone number or WhatsApp JID.",
+          "maxLength": 100,
+          "minLength": 3,
+          "type": "string",
+        },
+        "limit": {
+          "default": 50,
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer",
+        },
+      },
+      "required": [
+        "chat",
+      ],
+      "type": "object",
+    },
+    "name": "get_thread",
+  },
+  {
+    "description": "Schedule a reminder (text inside the 24h window, or an approved template).",
+    "inputSchema": {
+      "properties": {
+        "account": {
+          "description": "Account id or alias. Omitted: the migration alias \`default\` (Baileys) or \`meta-default\` (Cloud API).",
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+        "client_msg_id": {
+          "description": "Idempotency key: the same value twice returns the first result without a second send.",
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string",
+        },
+        "due_at": {
+          "description": "ISO time; omitted = now.",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "type": "string",
+        },
+        "template": {
+          "properties": {
+            "language": {
+              "default": "he",
+              "maxLength": 15,
+              "minLength": 2,
+              "type": "string",
+            },
+            "name": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string",
+            },
+            "params": {
+              "default": [],
+              "items": {
+                "maxLength": 1024,
+                "type": "string",
+              },
+              "maxItems": 20,
+              "type": "array",
+            },
+          },
+          "required": [
+            "name",
+          ],
+          "type": "object",
+        },
+        "text": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string",
+        },
+        "to": {
+          "description": "Recipient: E.164 / Israeli local number or WhatsApp JID.",
+          "maxLength": 100,
+          "minLength": 3,
+          "type": "string",
+        },
+      },
+      "required": [
+        "to",
+      ],
+      "type": "object",
+    },
+    "name": "send_reminder",
+  },
+  {
+    "description": "List reminders.",
+    "inputSchema": {
+      "properties": {
+        "account": {
+          "description": "Account id or alias. Omitted: the migration alias \`default\` (Baileys) or \`meta-default\` (Cloud API).",
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+        "limit": {
+          "default": 50,
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer",
+        },
+        "state": {
+          "enum": [
+            "scheduled",
+            "queued",
+            "sending",
+            "sent",
+            "delivered",
+            "read",
+            "failed",
+            "unconfigured",
+            "cancelled",
+          ],
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "list_reminders",
+  },
+  {
+    "description": "Cancel a reminder that was not sent yet.",
+    "inputSchema": {
+      "properties": {
+        "account": {
+          "description": "Account id or alias. Omitted: the migration alias \`default\` (Baileys) or \`meta-default\` (Cloud API).",
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+        "id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+      ],
+      "type": "object",
+    },
+    "name": "cancel_reminder",
+  },
+  {
+    "description": "Connection state of the account (never returns QR codes or secrets).",
+    "inputSchema": {
+      "properties": {
+        "account": {
+          "description": "Account id or alias. Omitted: the migration alias \`default\` (Baileys) or \`meta-default\` (Cloud API).",
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "session_status",
+  },
+  {
+    "description": "Ask the worker to reconnect the account.",
+    "inputSchema": {
+      "properties": {
+        "account": {
+          "description": "Account id or alias. Omitted: the migration alias \`default\` (Baileys) or \`meta-default\` (Cloud API).",
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "session_reconnect",
+  },
+  {
+    "description": "Accounts this key can use, with provider and capabilities.",
+    "inputSchema": {
+      "properties": {},
+      "type": "object",
+    },
+    "name": "list_accounts",
+  },
+  {
+    "description": "Send an image, video, audio/voice note or document.",
+    "inputSchema": {
+      "properties": {
+        "account": {
+          "description": "Account id or alias. Omitted: the migration alias \`default\` (Baileys) or \`meta-default\` (Cloud API).",
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+        "caption": {
+          "maxLength": 1024,
+          "type": "string",
+        },
+        "client_msg_id": {
+          "description": "Idempotency key: the same value twice returns the first result without a second send.",
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string",
+        },
+        "filename": {
+          "maxLength": 255,
+          "type": "string",
+        },
+        "mime": {
+          "maxLength": 100,
+          "minLength": 3,
+          "pattern": "^[\\w.+-]+\\/[\\w.+-]+$",
+          "type": "string",
+        },
+        "reply_to_id": {
+          "description": "Message id to quote/reply to.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string",
+        },
+        "storage_path": {
+          "description": "Path in the Gateway media bucket.",
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string",
+        },
+        "to": {
+          "description": "Recipient: E.164 / Israeli local number or WhatsApp JID.",
+          "maxLength": 100,
+          "minLength": 3,
+          "type": "string",
+        },
+        "url": {
+          "description": "https URL of the media (checked by the outbound URL guard).",
+          "maxLength": 2048,
+          "pattern": "^https:\\/\\/[^\\s]+$",
+          "type": "string",
+        },
+        "use_case": {
+          "description": "Use case; defaults to the account's default.",
+          "enum": [
+            "reminders",
+            "notifications",
+            "customer_service",
+            "bookings",
+            "agent_relay",
+            "status_automation",
+          ],
+          "type": "string",
+        },
+        "voice": {
+          "type": "boolean",
+        },
+        "wait": {
+          "default": false,
+          "description": "Wait up to ~5s for the message to reach status \`sent\`.",
+          "type": "boolean",
+        },
+      },
+      "required": [
+        "to",
+        "mime",
+      ],
+      "type": "object",
+    },
+    "name": "send_media",
+  },
+  {
+    "description": "Send an approved Cloud API template (required outside the 24h window).",
+    "inputSchema": {
+      "properties": {
+        "account": {
+          "description": "Account id or alias. Omitted: the migration alias \`default\` (Baileys) or \`meta-default\` (Cloud API).",
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+        "client_msg_id": {
+          "description": "Idempotency key: the same value twice returns the first result without a second send.",
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string",
+        },
+        "language": {
+          "default": "he",
+          "maxLength": 15,
+          "minLength": 2,
+          "type": "string",
+        },
+        "name": {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string",
+        },
+        "params": {
+          "default": [],
+          "items": {
+            "maxLength": 1024,
+            "type": "string",
+          },
+          "maxItems": 20,
+          "type": "array",
+        },
+        "to": {
+          "description": "Recipient: E.164 / Israeli local number or WhatsApp JID.",
+          "maxLength": 100,
+          "minLength": 3,
+          "type": "string",
+        },
+        "use_case": {
+          "description": "Use case; defaults to the account's default.",
+          "enum": [
+            "reminders",
+            "notifications",
+            "customer_service",
+            "bookings",
+            "agent_relay",
+            "status_automation",
+          ],
+          "type": "string",
+        },
+      },
+      "required": [
+        "to",
+        "name",
+      ],
+      "type": "object",
+    },
+    "name": "send_template",
+  },
+  {
+    "description": "List approved Cloud API templates.",
+    "inputSchema": {
+      "properties": {
+        "account": {
+          "description": "Account id or alias. Omitted: the migration alias \`default\` (Baileys) or \`meta-default\` (Cloud API).",
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+        "category": {
+          "maxLength": 30,
+          "type": "string",
+        },
+        "language": {
+          "maxLength": 15,
+          "type": "string",
+        },
+        "name": {
+          "maxLength": 512,
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "list_templates",
+  },
+  {
+    "description": "List chats (paged).",
+    "inputSchema": {
+      "properties": {
+        "account": {
+          "description": "Account id or alias. Omitted: the migration alias \`default\` (Baileys) or \`meta-default\` (Cloud API).",
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+        "cursor": {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string",
+        },
+        "limit": {
+          "default": 50,
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer",
+        },
+      },
+      "type": "object",
+    },
+    "name": "list_chats",
+  },
+  {
+    "description": "Messages of a chat, paged with a cursor.",
+    "inputSchema": {
+      "properties": {
+        "account": {
+          "description": "Account id or alias. Omitted: the migration alias \`default\` (Baileys) or \`meta-default\` (Cloud API).",
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+        "chat": {
+          "description": "Chat: phone number or WhatsApp JID.",
+          "maxLength": 100,
+          "minLength": 3,
+          "type": "string",
+        },
+        "cursor": {
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string",
+        },
+        "limit": {
+          "default": 50,
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer",
+        },
+      },
+      "required": [
+        "chat",
+      ],
+      "type": "object",
+    },
+    "name": "get_messages",
+  },
+  {
+    "description": "One message by id.",
+    "inputSchema": {
+      "properties": {
+        "account": {
+          "description": "Account id or alias. Omitted: the migration alias \`default\` (Baileys) or \`meta-default\` (Cloud API).",
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+        "message_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "message_id",
+      ],
+      "type": "object",
+    },
+    "name": "get_message",
+  },
+  {
+    "description": "Delivery status of one message.",
+    "inputSchema": {
+      "properties": {
+        "account": {
+          "description": "Account id or alias. Omitted: the migration alias \`default\` (Baileys) or \`meta-default\` (Cloud API).",
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+        "message_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "message_id",
+      ],
+      "type": "object",
+    },
+    "name": "get_message_status",
+  },
+  {
+    "description": "Resend a failed message (same idempotency lineage).",
+    "inputSchema": {
+      "properties": {
+        "account": {
+          "description": "Account id or alias. Omitted: the migration alias \`default\` (Baileys) or \`meta-default\` (Cloud API).",
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+        "message_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "message_id",
+      ],
+      "type": "object",
+    },
+    "name": "resend_message",
+  },
+  {
+    "description": "Mark messages in a chat as read.",
+    "inputSchema": {
+      "properties": {
+        "account": {
+          "description": "Account id or alias. Omitted: the migration alias \`default\` (Baileys) or \`meta-default\` (Cloud API).",
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+        "chat": {
+          "description": "Chat: phone number or WhatsApp JID.",
+          "maxLength": 100,
+          "minLength": 3,
+          "type": "string",
+        },
+        "message_ids": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string",
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "type": "array",
+        },
+      },
+      "required": [
+        "chat",
+        "message_ids",
+      ],
+      "type": "object",
+    },
+    "name": "mark_read",
+  },
+  {
+    "description": "List WhatsApp groups (Baileys accounts).",
+    "inputSchema": {
+      "properties": {
+        "account": {
+          "description": "Account id or alias. Omitted: the migration alias \`default\` (Baileys) or \`meta-default\` (Cloud API).",
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "list_groups",
+  },
+  {
+    "description": "Send a text message to a group (Baileys accounts).",
+    "inputSchema": {
+      "properties": {
+        "account": {
+          "description": "Account id or alias. Omitted: the migration alias \`default\` (Baileys) or \`meta-default\` (Cloud API).",
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+        "client_msg_id": {
+          "description": "Idempotency key: the same value twice returns the first result without a second send.",
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string",
+        },
+        "group": {
+          "pattern": "^[\\d-]+@g\\.us$",
+          "type": "string",
+        },
+        "reply_to_id": {
+          "description": "Message id to quote/reply to.",
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string",
+        },
+        "text": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string",
+        },
+        "use_case": {
+          "description": "Use case; defaults to the account's default.",
+          "enum": [
+            "reminders",
+            "notifications",
+            "customer_service",
+            "bookings",
+            "agent_relay",
+            "status_automation",
+          ],
+          "type": "string",
+        },
+        "wait": {
+          "default": false,
+          "description": "Wait up to ~5s for the message to reach status \`sent\`.",
+          "type": "boolean",
+        },
+      },
+      "required": [
+        "group",
+        "text",
+      ],
+      "type": "object",
+    },
+    "name": "send_group_message",
+  },
+  {
+    "description": "Capability flags of the account (what is supported).",
+    "inputSchema": {
+      "properties": {
+        "account": {
+          "description": "Account id or alias. Omitted: the migration alias \`default\` (Baileys) or \`meta-default\` (Cloud API).",
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "name": "get_capabilities",
+  },
+]
+`;
