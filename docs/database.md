@@ -169,6 +169,10 @@ SELECT in bucket `media` only under an existing org's prefix (and the JWT `org_i
 `storage_worker_path_ok(name)`, no `..`); `service_role` everything in `media`; `authenticated` and
 `anon` nothing. Dashboard users and relay receivers only ever get ≤15-minute signed URLs minted by the
 server (`media_url` in relay payloads, `getVoiceOriginalUrl` "play original").
+Cloud API inbound media: `/api/meta/webhook` stores `messages.media_path = 'graph-media:<id>'` and answers
+Meta immediately; the deliver step (`/api/internal/deliver`, relay batches) copies it (Graph
+`GET /{media-id}` → Meta CDN download with the account token, 25 MB cap, 10 s timeouts) into
+`<org>/<account>/<provider_message_id>` and updates `media_path` (compare-and-set) before signing.
 
 | Function | Returns | Caller | Notes |
 |---|---|---|---|

@@ -1,6 +1,6 @@
 /**
  * Test-only in-memory stand-in for the supabase-js client surface this app uses
- * (`rpc`, chained `from()` queries, `storage.createSignedUrl`). Not imported by app code.
+ * (`rpc`, chained `from()` queries, `storage.createSignedUrl` / `upload`). Not imported by app code.
  */
 import type { Db } from '../supabase';
 import { parseEnv, type Env } from '../env';
@@ -25,12 +25,14 @@ export interface FakeDb {
   db: Db;
   rpcCalls: { fn: string; args: Record<string, unknown> }[];
   ops: TableOp[];
+  uploads: { bucket: string; path: string; bytes: Uint8Array; options: Record<string, unknown> }[];
   calledRpc(fn: string): { fn: string; args: Record<string, unknown> }[];
 }
 
 export function createFakeDb(opts: FakeDbOptions = {}): FakeDb {
   const rpcCalls: FakeDb['rpcCalls'] = [];
   const ops: TableOp[] = [];
+  const uploads: FakeDb['uploads'] = [];
 
   function builder(table: string) {
     const op: TableOp = {
@@ -96,11 +98,15 @@ export function createFakeDb(opts: FakeDbOptions = {}): FakeDb {
       return { data: r.data ?? null, error: r.error ?? null };
     },
     storage: {
-      from: () => ({
+      from: (bucket: string) => ({
         createSignedUrl: async (path: string, ttl: number) => ({
           data: { signedUrl: `https://storage.example.test/${path}?ttl=${ttl}&token=signed` },
           error: null,
         }),
+        upload: async (path: string, bytes: Uint8Array, o: Record<string, unknown>) => {
+          uploads.push({ bucket, path, bytes, options: o });
+          return { data: { path }, error: null };
+        },
       }),
     },
   } as unknown as Db;
@@ -109,6 +115,7 @@ export function createFakeDb(opts: FakeDbOptions = {}): FakeDb {
     db,
     rpcCalls,
     ops,
+    uploads,
     calledRpc: (fn) => rpcCalls.filter((c) => c.fn === fn),
   };
 }

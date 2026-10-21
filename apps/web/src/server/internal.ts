@@ -34,7 +34,8 @@ import { checkSend } from './send-gate';
 import { isStoragePath, signedMediaUrl } from './media';
 import { env } from './env';
 import { json } from './http';
-import { logError } from './log';
+import { logError, logWarn } from './log';
+import { isGraphMediaPath, materializeCloudMedia } from './cloud-media';
 
 /* ================================================================== cloud-send (R4.5) */
 
@@ -215,6 +216,8 @@ export interface DeliverOptions {
   /** Test seam for the SSRF-guarded HTTPS client (resolver / request injection). */
   fetchOptions?: Partial<GuardedFetchOptions>;
   fetchImpl?: typeof guardedFetch;
+  /** Test seam for the Graph media download (Cloud inbound media → Storage). */
+  mediaFetch?: typeof fetch;
 }
 
 interface BatchRow {
@@ -238,6 +241,10 @@ interface TargetRow {
 
 interface RelayMsgRow {
   id: string;
+  org_id: string;
+  account_id: string;
+  provider_message_id: string | null;
+  media_mime: string | null;
   kind: string;
   body: string | null;
   sender_jid: string | null;
@@ -276,12 +283,16 @@ async function senderE164(db: Db, accountId: string, jid: string | null): Promis
   return n.value.jid;
 }
 
-async function buildRelayMessages(db: Db, batch: BatchRow): Promise<RelayMessage[] | null> {
+async function buildRelayMessages(
+  db: Db,
+  batch: BatchRow,
+  opts: DeliverOptions,
+): Promise<RelayMessage[] | null> {
   const r = await query<RelayMsgRow[] | null>(
     db
       .from('messages')
       .select(
-        'id, kind, body, sender_jid, received_at, created_at, media_path, transcript, quoted_provider_id, is_forwarded',
+        'id, org_id, account_id, provider_message_id, kind, body, sender_jid, received_at, created_at, media_path, media_mime, transcript, quoted_provider_id, is_forwarded',
       )
       .in('id', batch.message_ids)
       .eq('account_id', batch.account_id),
@@ -295,8 +306,21 @@ async function buildRelayMessages(db: Db, batch: BatchRow): Promise<RelayMessage
     if (!m) continue;
     const route = routeInboundType(m.kind as InboundType);
     let mediaUrl: string | null = null;
-    if (m.media_path && isStoragePath(m.media_path)) {
-      const s = await signedMediaUrl(db, m.media_path);
+    let mediaPath = m.media_path;
+    if (isGraphMediaPath(mediaPath)) {
+      // Cloud inbound media is copied into Storage here (deferred from the Meta webhook, so the
+      // 200 to Meta never waits on a download). On failure the batch still goes, without a URL.
+      const c = await materializeCloudMedia(
+        db,
+        { ...m, media_path: mediaPath },
+        opts.mediaFetch ? { fetchImpl: opts.mediaFetch } : {},
+      );
+      if (c.ok) mediaPath = c.value;
+      else
+        logWarn('cloud_media_copy_failed', { code: c.error.code, detail: c.error.detail ?? null });
+    }
+    if (mediaPath && isStoragePath(mediaPath)) {
+      const s = await signedMediaUrl(db, mediaPath);
       mediaUrl = s.ok ? s.value : null;
     }
     out.push({
@@ -358,7 +382,7 @@ export async function deliverRelayBatch(
     const secret = await rpc<string | null>(db, 'vault_read_secret', {
       p_id: target.secret_vault_id,
     });
-    const messages = await buildRelayMessages(db, batch);
+    const messages = await buildRelayMessages(db, batch, opts);
     if (!secret.ok || !secret.value || messages === null) {
       return json(503, { ok: false, code: 'internal' }); // lease expires; re-claimed later
     }

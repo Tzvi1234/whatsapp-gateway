@@ -15,7 +15,8 @@ import { metaWebhookUrl } from './urls';
  * Meta Cloud API webhook (ARCH §4.3, §7.3; TEST-PLAN S1, S2, C6, C15).
  * GET: hub challenge against each Cloud account's Verify Token (wrong → 403).
  * POST: signature over the EXACT raw bytes with the account's App Secret (bad → 401),
- * then idempotent `ingest_inbound` / `apply_message_status`, 200 fast.
+ * then idempotent `ingest_inbound` / `apply_message_status`, 200 fast. Media is stored as
+ * `graph-media:<id>` and copied into Storage later, in the deliver step (`cloud-media.ts`).
  */
 
 export const MAX_WEBHOOK_BYTES = 1024 * 1024;
