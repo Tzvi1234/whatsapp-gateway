@@ -1,0 +1,49 @@
+# WhatsApp Gateway worker (prod). systemd --user unit on htz-home-01, user `deploy`.
+# Runbook: apps/worker/README.md. NEVER run alongside the legacy `whatsapp-automation` unit on
+# the same number (two Baileys sessions on one number conflict, ARCH §9.3).
+#
+# Install: cp deploy/gateway-worker.service ~/.config/systemd/user/ && systemctl --user daemon-reload
+#          systemctl --user enable --now gateway-worker
+
+[Unit]
+Description=WhatsApp Gateway worker (Baileys sockets, queue, relay, heartbeat)
+Documentation=file:%h/whatsapp-gateway/apps/worker/README.md
+After=network-online.target gateway-transcriber.service
+Wants=network-online.target
+StartLimitIntervalSec=1h
+StartLimitBurst=30
+
+[Service]
+Type=simple
+WorkingDirectory=%h/whatsapp-gateway/apps/worker
+# SUPABASE_URL, SUPABASE_WORKER_JWT (role gateway_worker, never service_role), WORKER_ID, ORG_ID,
+# LIA_ALLOWLIST_SEED, ... (file mode 0600, never committed). See README "Configuration".
+EnvironmentFile=%h/.config/gateway/worker.env
+Environment=NODE_ENV=production
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# 32-byte session master key (0400, outside the repo and the data dir, backed up offline).
+# Exposed read-only as $CREDENTIALS_DIRECTORY/session.key; never in env, logs or Supabase.
+LoadCredential=session.key:%h/.config/gateway/session.key
+ExecStart=/usr/bin/env node dist/main.mjs
+
+Restart=always
+RestartSec=5s
+# 78 = EX_CONFIG (bad worker.env / service_role key / bad session key): fix config, do not loop.
+RestartPreventExitStatus=78
+KillSignal=SIGTERM
+TimeoutStopSec=60s
+
+# Hardening (ARCH §7.4). No negative OOMScoreAdjust: unprivileged user units can only raise it.
+# The transcriber unit carries MemoryMax + OOMScoreAdjust=800, so it dies first under pressure.
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+StateDirectory=gateway-worker
+ReadWritePaths=%S/gateway-worker
+# Unix socket of gateway-transcriber ($XDG_RUNTIME_DIR); '-' = ignore when absent at start.
+ReadWritePaths=-%t/gateway-transcriber.sock
+MemoryLow=192M
+
+[Install]
+WantedBy=default.target

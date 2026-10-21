@@ -1,0 +1,40 @@
+# WhatsApp Gateway worker (dev): points at the `gateway-dev` Supabase project and the dedicated
+# TEST number only. Same hardening as prod; separate env file, key and state dir.
+# Never run it on a number that `gateway-worker` or `whatsapp-automation` uses.
+#
+# Install: cp deploy/gateway-worker-dev.service ~/.config/systemd/user/ && systemctl --user daemon-reload
+
+[Unit]
+Description=WhatsApp Gateway worker (dev, test number only)
+Documentation=file:%h/whatsapp-gateway-dev/apps/worker/README.md
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=1h
+StartLimitBurst=30
+
+[Service]
+Type=simple
+WorkingDirectory=%h/whatsapp-gateway-dev/apps/worker
+EnvironmentFile=%h/.config/gateway/worker-dev.env
+Environment=NODE_ENV=development
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+LoadCredential=session.key:%h/.config/gateway/session-dev.key
+ExecStart=/usr/bin/env node dist/main.mjs
+
+Restart=always
+RestartSec=5s
+RestartPreventExitStatus=78
+KillSignal=SIGTERM
+TimeoutStopSec=60s
+
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+StateDirectory=gateway-worker-dev
+ReadWritePaths=%S/gateway-worker-dev
+ReadWritePaths=-%t/gateway-transcriber.sock
+MemoryLow=128M
+
+[Install]
+WantedBy=default.target
