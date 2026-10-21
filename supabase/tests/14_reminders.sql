@@ -15,7 +15,7 @@ select results_eq($s$select reminder_id, created from public.reminder_create(tes
 select is((select state from public.reminders where id = (select reminder_id from r1)), 'scheduled',
   'R4.1 configured Cloud account → scheduled');
 select throws_ok(format($s$select * from public.reminder_create(%L, '+15550000009', now())$s$, tests.id('acc_a_cloud')),
-  '22023', null, 'reminder needs text or template');
+  '22023', null, 'R4.1 reminder needs text or template');
 
 -- R4.8: cron job exists and runs every minute.
 select is((select schedule from cron.job where jobname = 'gw-reminders'), '* * * * *', 'R4.8 gw-reminders every minute');
@@ -23,10 +23,10 @@ select is((select schedule from cron.job where jobname = 'gw-reminders'), '* * *
 -- Claim → sending, leased; not claimable twice.
 select is(public.reminders_dispatch_due() >= 1, true, 'R4.8 due reminders counted (Edge Function invoked)');
 create temp table c1 on commit drop as select * from public.reminders_claim_due('edge:test', 50);
-select is((select count(*)::int from c1 where reminder_id = (select reminder_id from r1)), 1, 'due reminder claimed');
-select is((select state from public.reminders where id = (select reminder_id from r1)), 'sending', 'claimed → sending');
+select is((select count(*)::int from c1 where reminder_id = (select reminder_id from r1)), 1, 'R4.8 due reminder claimed');
+select is((select state from public.reminders where id = (select reminder_id from r1)), 'sending', 'R4.8 claimed → sending');
 select is((select count(*)::int from public.reminders_claim_due('edge:other', 50) where reminder_id = (select reminder_id from r1)),
-  0, 'leased reminder not re-claimed');
+  0, 'R4.8 leased reminder not re-claimed');
 
 -- R4.6: cannot cancel while dispatching / after send.
 select throws_ok(format($s$select public.reminder_cancel(%L, %L)$s$, (select reminder_id from r1), tests.id('acc_a_cloud')),
@@ -38,13 +38,13 @@ select message_id as id from public.enqueue_message(tests.id('acc_a_cloud'), '15
   p_use_case => 'reminders', p_idempotency_key => 'reminder:' || (select reminder_id from r1));
 select is(public.reminder_record_dispatch((select reminder_id from r1), (select id from m1)), 'queued',
   'R4.1 dispatch links the message (state = message status)');
-select is((select attempts from public.reminders where id = (select reminder_id from r1)), 1, 'one attempt used');
+select is((select attempts from public.reminders where id = (select reminder_id from r1)), 1, 'R4.1 one attempt used');
 select public.message_record_send_result((select id from m1), 'wamid.REM1');
 select is((select state from public.reminders where id = (select reminder_id from r1)), 'sent', 'R4.1 reminder follows message → sent');
 select public.apply_message_status(tests.id('acc_a_cloud'), 'wamid.REM1', 'delivered');
-select is((select state from public.reminders where id = (select reminder_id from r1)), 'delivered', 'reminder → delivered');
+select is((select state from public.reminders where id = (select reminder_id from r1)), 'delivered', 'R4.1 reminder → delivered');
 select is(public.reminder_record_dispatch((select reminder_id from r1), null, 'internal'), 'delivered',
-  'late duplicate dispatch result is a no-op');
+  'R4.1 late duplicate dispatch result is a no-op');
 select throws_ok(format($s$select public.reminder_cancel(%L, %L)$s$, (select reminder_id from r1), tests.id('acc_a_cloud')),
   '55000', 'reminder_already_delivered', 'R4.6 cancel after send rejected with a clear reason');
 
@@ -84,20 +84,20 @@ select is((select count(*)::int from public.reminders_claim_due('edge:test', 50)
 -- Expired dispatch lease without a linked message is re-claimed.
 update public.reminders set lease_until = now() - interval '1 second' where id = (select reminder_id from r3);
 select is((select count(*)::int from public.reminders_claim_due('edge:test2', 50) where reminder_id = (select reminder_id from r3)),
-  1, 'crashed dispatch is re-claimed (enqueue is idempotent on reminder:<id>)');
+  1, 'R4.8 crashed dispatch is re-claimed (enqueue is idempotent on reminder:<id>)');
 
 -- R4.6: cancel before send.
 create temp table r4 on commit drop as
 select * from public.reminder_create(tests.id('acc_a'), '+15550000006', now() + interval '1 day', 'later');
 select is(public.reminder_cancel((select reminder_id from r4), tests.id('acc_a')), 'cancelled', 'R4.6 cancel before send');
 select throws_ok(format($s$select public.reminder_cancel(%L, %L)$s$, (select reminder_id from r4), tests.id('acc_a_cloud')),
-  'P0002', null, 'cancel is scoped to the account');
+  'P0002', null, 'R4.6 cancel is scoped to the account');
 
 -- Grants.
 select is(tests.try_sql('gateway_worker', '{"role": "gateway_worker"}', $s$select public.reminders_claim_due('w', 1)$s$),
   'err:42501', 'S13 the worker cannot claim reminders (dispatch runs through the server gate)');
 select is(tests.try_sql('authenticated', tests.claims('owner_a'), $s$select public.reminders_dispatch_due()$s$),
-  'err:42501', 'dashboard users cannot run the dispatcher');
+  'err:42501', 'S6 dashboard users cannot run the dispatcher');
 
 select * from finish();
 rollback;

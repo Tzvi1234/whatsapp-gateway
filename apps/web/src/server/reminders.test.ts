@@ -229,7 +229,7 @@ describe('reminder dispatch (/api/internal/reminders)', () => {
     expect(gate.calls).toHaveLength(0);
   });
 
-  it('Baileys reminders are queued for the worker (no direct send here)', async () => {
+  it('R4.1 Baileys reminders are queued for the worker (no direct send here)', async () => {
     const f = world({ provider: 'baileys' });
     const p = provider();
     await handleReminderDispatch(body, f.db, { provider: p as never, now: () => NOW });
@@ -248,7 +248,7 @@ describe('reminder dispatch (/api/internal/reminders)', () => {
     expect(gate.calls).toHaveLength(0);
   });
 
-  it('crash between enqueue and record → existing reminder:<id> message is linked, never resent', async () => {
+  it('R4.8 crash between enqueue and record → existing reminder:<id> message is linked, never resent', async () => {
     const f = world({ priorMessage: true });
     const p = provider();
     await handleReminderDispatch(body, f.db, { provider: p as never, now: () => NOW });
@@ -259,7 +259,7 @@ describe('reminder dispatch (/api/internal/reminders)', () => {
     });
   });
 
-  it('route requires x-internal-secret', async () => {
+  it('S13 route requires x-internal-secret', async () => {
     current = world();
     const res = await route.POST(
       new Request('https://gateway.example.test/api/internal/reminders', {

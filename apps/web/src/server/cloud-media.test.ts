@@ -102,7 +102,7 @@ describe('Cloud inbound media → private Storage (deferred to the deliver step)
     expect(d.uploads).toHaveLength(0);
   });
 
-  it('size cap: declared file_size or streamed bytes over the cap → media_too_large, nothing stored', async () => {
+  it('S9 size cap: declared file_size or streamed bytes over the cap → media_too_large, nothing stored', async () => {
     const big = db();
     const r1 = await materializeCloudMedia(big.db, msg(), {
       fetchImpl: graphFetch({ fileSize: 100 }).f,
@@ -118,7 +118,7 @@ describe('Cloud inbound media → private Storage (deferred to the deliver step)
     expect(big.uploads.length + lying.uploads.length).toBe(0);
   });
 
-  it('no Cloud token → provider_unconfigured, no network', async () => {
+  it('S9 no Cloud token → provider_unconfigured, no network', async () => {
     const g = graphFetch();
     const r = await materializeCloudMedia(db({ creds: false }).db, msg(), { fetchImpl: g.f });
     expect(r).toMatchObject({ ok: false, error: { code: 'provider_unconfigured' } });
