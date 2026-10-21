@@ -1,7 +1,7 @@
 // cloud-retry: invoked every minute by pg_cron (job gw-cloud-retry) when executor='edge'
 // jobs are due (ARCH §4.1, §8.2, TEST-PLAN R4.5, R4.8). Claims Cloud API retry jobs and hands
-// each one to Vercel (/api/internal/cloud-send), which performs the Graph call and then calls
-// complete_job / fail_job itself. If Vercel cannot be reached, the job is failed as transient
+// each one to Vercel (/api/internal/cloud-send), which re-runs the send gate (S13), performs
+// the Graph call and then calls complete_job / fail_job itself. If Vercel cannot be reached, the job is failed as transient
 // here so the normal backoff (5s, 30s, 2m, 10m, 15m) applies.
 //
 // Env: EDGE_CRON_SECRET, PUBLIC_BASE_URL, INTERNAL_API_SECRET.

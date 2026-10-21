@@ -5,7 +5,7 @@ import { isUuid, query } from '../db';
 import type { StoredOutbound } from '../cloud';
 
 export const MESSAGE_COLUMNS =
-  'id, account_id, conversation_id, direction, kind, body, status, delivery_mode, provider_message_id, quoted_provider_id, error_code, idempotency_key, use_case, media_path, media_mime, template, created_at, sent_at, conversations(chat_jid)';
+  'id, account_id, conversation_id, direction, kind, body, status, delivery_mode, provider_message_id, quoted_provider_id, error_code, idempotency_key, use_case, media_path, media_mime, template, api_client_id, created_by, created_at, sent_at, conversations(chat_jid)';
 
 export interface MessageRow {
   id: string;
@@ -24,6 +24,9 @@ export interface MessageRow {
   media_path: string | null;
   media_mime: string | null;
   template: unknown;
+  /** Who asked for the send (re-gating on retries, S13). */
+  api_client_id?: string | null;
+  created_by?: string | null;
   created_at: string;
   sent_at: string | null;
   conversations: { chat_jid: string } | { chat_jid: string }[] | null;

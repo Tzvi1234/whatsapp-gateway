@@ -6,10 +6,22 @@ import {
   computeLiaTestResult,
   routeInboundType,
 } from '@htz/relay';
-import { guardedFetch, type GuardedFetchOptions } from '@htz/policy';
 import {
+  guardedFetch,
+  type GuardedFetchOptions,
+  type SendActor,
+  type SendEntryPoint,
+} from '@htz/policy';
+import {
+  err,
+  gatewayError,
+  isScope,
   normalizeJid,
+  USE_CASES,
   type InboundType,
+  type OutboundKind,
+  type Result,
+  type UseCase,
   type RelayMessage,
   type RelayTranscriptEvent,
 } from '@htz/core';
@@ -17,13 +29,20 @@ import type { CloudApiProvider } from '@htz/provider-cloud';
 import type { Db } from './supabase';
 import { isUuid, query, rpc } from './db';
 import { createCloudProvider, sendStored } from './cloud';
-import { getMessageRow, toStoredOutbound } from './repo/messages';
+import { chatOf, getMessageRow, toStoredOutbound, type MessageRow } from './repo/messages';
+import { checkSend } from './send-gate';
 import { isStoragePath, signedMediaUrl } from './media';
 import { env } from './env';
 import { json } from './http';
 import { logError } from './log';
 
 /* ================================================================== cloud-send (R4.5) */
+
+/** Idempotency-key prefix of messages enqueued by the reminder dispatcher. */
+export const REMINDER_KEY_PREFIX = 'reminder:';
+
+const isUseCase = (v: string | null | undefined): v is UseCase =>
+  typeof v === 'string' && (USE_CASES as readonly string[]).includes(v);
 
 export const cloudSendBody = z.object({
   job_id: z.uuid(),
@@ -87,6 +106,20 @@ export async function handleCloudSend(
     return json(200, { ok: true, outcome: 'completed_existing' });
   }
 
+  // S13: every retry passes the send gate again (policy, key bindings or the 24h window may have
+  // changed since the first attempt). A rejection fails the job permanently with the gate's code.
+  const gate = await regateStoredSend(db, m.value, now);
+  if (!gate.ok) {
+    const r = await rpc<string>(db, 'fail_job', {
+      p_job_id: job_id,
+      p_error_code: gate.error.code,
+      p_transient: false,
+      p_detail: gate.error.detail ?? null,
+    });
+    if (!r.ok) return json(503, { ok: false, code: 'internal' });
+    return json(200, { ok: true, outcome: 'gate_rejected', code: gate.error.code });
+  }
+
   const res = await sendStored(opts.provider ?? createCloudProvider(db), toStoredOutbound(m.value));
   if (res.ok && res.providerMessageId) {
     const r = await rpc<boolean>(db, 'complete_job', {
@@ -106,6 +139,67 @@ export async function handleCloudSend(
   });
   if (!r.ok) return json(503, { ok: false, code: 'internal' });
   return json(200, { ok: true, outcome: 'failed', state: r.value, code: e.code });
+}
+
+/** Entry point a stored outbound message originally came through (S13 tagging on retries). */
+export function entryPointForStored(
+  m: Pick<MessageRow, 'idempotency_key' | 'use_case' | 'kind' | 'created_by'>,
+): SendEntryPoint {
+  if (m.idempotency_key?.startsWith(REMINDER_KEY_PREFIX)) return 'reminders.dispatch';
+  if (m.use_case === 'agent_relay') return 'relay.reply';
+  if (m.created_by) return 'dashboard.send';
+  if (m.kind === 'template') return 'mcp.send_template';
+  if (m.kind === 'media') return 'mcp.send_media';
+  return 'mcp.send_message';
+}
+
+interface ApiClientGateRow {
+  id: string;
+  scopes: string[] | null;
+  account_ids: string[] | null;
+  conversation_ids: string[] | null;
+  revoked_at: string | null;
+  expires_at: string | null;
+}
+
+/** Re-runs THE send gate for a stored outbound message (Cloud retries). Fails closed. */
+export async function regateStoredSend(db: Db, m: MessageRow, now: Date): Promise<Result<unknown>> {
+  let actor: SendActor = { type: 'system', component: 'cloud.retry' };
+  if (m.api_client_id) {
+    const k = await query<ApiClientGateRow | null>(
+      db
+        .from('api_clients')
+        .select('id, scopes, account_ids, conversation_ids, revoked_at, expires_at')
+        .eq('id', m.api_client_id)
+        .maybeSingle(),
+      'api_clients.gate',
+    );
+    if (!k.ok) return err(gatewayError('internal', 'gate_key_lookup_failed', { transient: true }));
+    const key = k.value;
+    if (!key || key.revoked_at || (key.expires_at && Date.parse(key.expires_at) <= now.getTime())) {
+      return err(gatewayError('forbidden_scope', 'api_client_inactive', { transient: false }));
+    }
+    actor = {
+      type: 'api_client',
+      clientId: key.id,
+      scopes: (key.scopes ?? []).filter(isScope),
+      accountIds: key.account_ids ?? [],
+      conversationIds: key.conversation_ids,
+    };
+  }
+  const kind = m.kind as OutboundKind;
+  return checkSend(
+    db,
+    {
+      entryPoint: entryPointForStored(m),
+      accountId: m.account_id,
+      chat: chatOf(m),
+      kind,
+      useCase: isUseCase(m.use_case) ? m.use_case : undefined,
+      actor,
+    },
+    now,
+  );
 }
 
 /* ================================================================== deliver (§4.7, S3) */

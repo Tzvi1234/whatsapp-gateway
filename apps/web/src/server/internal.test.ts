@@ -308,19 +308,31 @@ describe('deliver relay transcript follow-up (L3.4)', () => {
 });
 
 describe('cloud-send', () => {
+  const KEY_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   const JOB = '88888888-8888-4888-8888-888888888888';
   const body = { job_id: JOB, message_id: MSG, account_id: ACCOUNT, attempt: 1, lease_until: 'x' };
   const lease = new Date(Date.now() + 30_000).toISOString();
 
-  function db(providerId: string | null = null) {
+  interface World {
+    providerId?: string | null;
+    policy?: Record<string, unknown>;
+    lastInboundAt?: string | null;
+    kind?: string;
+    apiClient?: Record<string, unknown> | null;
+    idempotencyKey?: string;
+    useCase?: string;
+  }
+
+  function db(providerId: string | null = null, w: World = {}) {
     return fake.createFakeDb({
       rpc: {
         complete_job: () => ({ data: true }),
         fail_job: () => ({ data: 'ready' }),
       },
-      table: (op) =>
-        op.table === 'outbound_queue'
-          ? {
+      table: (op) => {
+        switch (op.table) {
+          case 'outbound_queue':
+            return {
               data: {
                 id: JOB,
                 message_id: MSG,
@@ -329,18 +341,61 @@ describe('cloud-send', () => {
                 lease_until: lease,
                 executor: 'edge',
               },
-            }
-          : {
+            };
+          case 'accounts':
+            return {
+              data: {
+                id: ACCOUNT,
+                org_id: '22222222-2222-4222-8222-222222222222',
+                provider: 'meta_cloud',
+                label: 'Cloud',
+                alias: 'meta-default',
+                phone_e164: null,
+                status: 'open',
+                capabilities: {},
+                use_case_policy: w.policy ?? {
+                  allowed_use_cases: ['customer_service', 'reminders'],
+                  may_initiate: false,
+                },
+                is_test: true,
+                created_at: '2026-10-21T00:00:00Z',
+              },
+            };
+          case 'conversations':
+            return {
+              data: {
+                id: '99999999-9999-4999-8999-999999999999',
+                chat_jid: '972500000003@s.whatsapp.net',
+                type: 'direct',
+                title: null,
+                last_inbound_at:
+                  w.lastInboundAt === undefined ? new Date().toISOString() : w.lastInboundAt,
+                last_message_at: null,
+              },
+            };
+          case 'api_clients':
+            return { data: w.apiClient ?? null };
+          case 'messages':
+            return {
               data: {
                 id: MSG,
                 account_id: ACCOUNT,
-                kind: 'text',
+                kind: w.kind ?? 'text',
                 body: 'hi',
+                template: w.kind === 'template' ? { name: 't', language: 'he', params: [] } : null,
                 status: 'sending',
-                provider_message_id: providerId,
+                provider_message_id: w.providerId ?? providerId,
+                idempotency_key: w.idempotencyKey ?? 'k-1',
+                use_case: w.useCase ?? 'customer_service',
+                api_client_id: w.apiClient ? KEY_ID : null,
+                created_by: null,
                 conversations: { chat_jid: '972500000003@s.whatsapp.net' },
               },
-            },
+            };
+          default:
+            return { data: null };
+        }
+      },
     });
   }
 
@@ -379,5 +434,81 @@ describe('cloud-send', () => {
       p_error_code: 'rate_limited',
       p_transient: true,
     });
+  });
+  it('S13 retry is re-gated: use case removed since the first attempt → permanent failure, never sent', async () => {
+    const f = db(null, { policy: { allowed_use_cases: ['notifications'], may_initiate: false } });
+    const send = vi.fn();
+    const res = await handleCloudSend(body, f.db, { provider: { send } as never });
+    expect(await res.json()).toMatchObject({
+      outcome: 'gate_rejected',
+      code: 'use_case_not_allowed',
+    });
+    expect(send).not.toHaveBeenCalled();
+    expect(f.calledRpc('fail_job')[0]!.args).toMatchObject({
+      p_job_id: JOB,
+      p_error_code: 'use_case_not_allowed',
+      p_transient: false,
+    });
+  });
+
+  it('S13 retry of a text after the 24h window closed → outside_24h_window, never sent', async () => {
+    const f = db(null, { lastInboundAt: '2026-01-01T00:00:00Z' });
+    const send = vi.fn();
+    await handleCloudSend(body, f.db, { provider: { send } as never });
+    expect(send).not.toHaveBeenCalled();
+    expect(f.calledRpc('fail_job')[0]!.args).toMatchObject({
+      p_error_code: 'outside_24h_window',
+      p_transient: false,
+    });
+  });
+
+  it('S13 retry of a key-originated send after the key was revoked → forbidden_scope', async () => {
+    const f = db(null, {
+      apiClient: {
+        id: KEY_ID,
+        scopes: ['messages:send'],
+        account_ids: [ACCOUNT],
+        conversation_ids: null,
+        revoked_at: '2026-10-21T00:00:00Z',
+        expires_at: null,
+      },
+    });
+    const send = vi.fn();
+    await handleCloudSend(body, f.db, { provider: { send } as never });
+    expect(send).not.toHaveBeenCalled();
+    expect(f.calledRpc('fail_job')[0]!.args).toMatchObject({ p_error_code: 'forbidden_scope' });
+  });
+
+  it('S13 retry with an active key passes the gate tagged with the original entry point', async () => {
+    const { createRecordingSendGate } = await import('@htz/policy');
+    const { setPolicyGateForTests } = await import('./send-gate');
+    const gate = createRecordingSendGate();
+    setPolicyGateForTests(gate);
+    try {
+      const f = db(null, {
+        apiClient: {
+          id: KEY_ID,
+          scopes: ['messages:send'],
+          account_ids: [ACCOUNT],
+          conversation_ids: null,
+          revoked_at: null,
+          expires_at: null,
+        },
+      });
+      const send = vi.fn(async () => ({ ok: true, providerMessageId: 'wamid.Y' }));
+      await handleCloudSend(body, f.db, { provider: { send } as never });
+      expect(send).toHaveBeenCalledOnce();
+      await handleCloudSend(
+        body,
+        db(null, { idempotencyKey: 'reminder:abc', useCase: 'reminders' }).db,
+        { provider: { send } as never },
+      );
+      expect(gate.calls.map((c) => c.entryPoint)).toEqual([
+        'mcp.send_message',
+        'reminders.dispatch',
+      ]);
+    } finally {
+      setPolicyGateForTests(null);
+    }
   });
 });

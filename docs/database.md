@@ -179,7 +179,7 @@ Edge Function env (`supabase secrets set ...`; `SUPABASE_URL`/`SUPABASE_SERVICE_
 |---|---|
 | all | `EDGE_CRON_SECRET` (= Vault `edge_cron_secret`) |
 | `heartbeat-alert` | `ALERT_EMAIL_API_KEY`, `ALERT_EMAIL_TO` (comma-separated; Tzvi's Gmail, never in the repo), `ALERT_EMAIL_FROM`, optional `ALERT_EMAIL_API_URL` (Resend-compatible, default `https://api.resend.com/emails`). Missing → dry-run (logs only). |
-| `cloud-retry`, `deliver-webhooks` | `PUBLIC_BASE_URL`, `INTERNAL_API_SECRET` → `POST /api/internal/cloud-send` `{job_id, message_id, account_id, attempt, lease_until}` and `POST /api/internal/deliver` `{kind: 'relay'\|'webhook'\|'relay_followup', id, attempt}` with header `x-internal-secret`. Vercel performs the Graph call / HMAC-signed POST and records the result with `complete_job`/`fail_job` and `relay_batch_delivery_result`/`webhook_delivery_result`. |
+| `cloud-retry`, `deliver-webhooks` | `PUBLIC_BASE_URL`, `INTERNAL_API_SECRET` → `POST /api/internal/cloud-send` `{job_id, message_id, account_id, attempt, lease_until}` and `POST /api/internal/deliver` `{kind: 'relay'\|'webhook'\|'relay_followup', id, attempt}` with header `x-internal-secret`. Vercel re-runs the send gate on every Cloud retry (S13: policy, key binding and 24h window may have changed; a rejection is `fail_job` permanent with the gate's code), performs the Graph call / HMAC-signed POST and records the result with `complete_job`/`fail_job` and `relay_batch_delivery_result`/`webhook_delivery_result`. |
 
 ## 7. Retention (S11, L6.4)
 
