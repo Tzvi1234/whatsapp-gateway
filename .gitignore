@@ -20,3 +20,4 @@ qr.png
 __pycache__/
 .venv/
 supabase/.temp/
+.claude/worktrees/

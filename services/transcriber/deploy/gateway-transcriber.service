@@ -1,0 +1,28 @@
+# systemd --user unit (no sudo, no Docker). Install: ~/.config/systemd/user/
+# Under memory pressure this unit must die first, never the Baileys worker (ARCH §4.7):
+#   MemoryMax sized to measured peak RSS (spike 0.4), OOMScoreAdjust=800 (unprivileged units may only raise it).
+[Unit]
+Description=WhatsApp Gateway local Hebrew transcriber (faster-whisper int8, ivrit-ai turbo)
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/whatsapp-gateway/services/transcriber
+Environment=TRANSCRIBER_SOCKET=%t/gateway-transcriber.sock
+Environment=TRANSCRIBER_MODEL=ivrit-ai/whisper-large-v3-turbo-ct2
+Environment=TRANSCRIBER_COMPUTE=int8
+Environment=TRANSCRIBER_THREADS=4
+Environment=HF_HOME=%h/.cache/huggingface
+ExecStart=%h/whatsapp-gateway/services/transcriber/.venv/bin/python -m transcriber
+Restart=always
+RestartSec=5
+Nice=10
+CPUWeight=20
+MemoryMax=2500M
+OOMScoreAdjust=800
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target
