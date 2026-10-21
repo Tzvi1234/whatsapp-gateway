@@ -68,3 +68,6 @@ verify_jwt = false
 
 [functions.reminders-dispatch]
 verify_jwt = false
+
+[functions.media-purge]
+verify_jwt = false

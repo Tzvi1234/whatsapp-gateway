@@ -29,6 +29,10 @@ finishes after its batch was posted becomes a `relay_followups` row via
 POSTs to the relay target as `{event:'transcript', batch_id, message_id, transcript}` (signed like
 batches).
 
+Storage (S9): the private `media` bucket and the worker's INSERT/SELECT policies (only under
+`<org_id>/…`, see `docs/database.md` §4b) come from migration `20261021141900_storage_media.sql`. The
+worker never deletes media; retention purges it server-side.
+
 Send path invariant (TEST-PLAN S13): every message the worker puts on the wire goes through
 `QueueProcessor`, which calls the shared `SendGate` (`@htz/policy`) with an entry point derived from
 the job (`relay.reply`, `relay.system_reply`, `automations.status_reply`, `reminders.dispatch`,
@@ -104,9 +108,3 @@ pnpm vitest run apps/worker
 
 Titles start with TEST-PLAN ids (L1.x, L3.x, RL1, RL2, RL5, R2.x, S5, S13, C12). Fakes only: no
 network, no sockets, fictitious numbers.
-
-## Known gaps (need DB/server changes, not worker code)
-
-- No Storage bucket/policy for `gateway_worker` exists in the migrations yet: media upload/download
-  fails (logged as `media_store_failed`) until a private `media` bucket with worker insert/select
-  policies is created.

@@ -44,7 +44,7 @@ Region: EU Frankfurt (deploy concern only).
 | `worker_heartbeats`, `worker_logs` | 7-day retention |
 | `heartbeat_state`, `downtime_intervals` | Server-down state machine + outage log (doubles as the e-mail outbox) |
 | `login_attempts`, `rate_limit_buckets` | Lockout and token buckets (`org_id` nullable: pre-auth / global) |
-| `media_purge_queue` | Storage objects whose references retention removed (delete via Storage API) |
+| `media_purge_queue` | Storage objects whose references retention removed (delete via Storage API); `attempts` (max 10), `lease_until`, `last_error`, `purged_at` |
 
 ## 3. Security model
 
@@ -161,6 +161,21 @@ runs the send gate (`reminders.dispatch`; text inside the 24h window, approved t
 ### Dashboard (RLS helpers)
 `is_member(org_id) → bool`, `is_owner(org_id) → bool`, `realtime_topic_allowed(topic) → bool` (U).
 
+## 4b. Storage (S9)
+
+Private bucket `media` (created by migration when the `storage` schema exists). Object path
+`<org_id>/<account_id>/<provider_message_id>`. Policies on `storage.objects`: `gateway_worker` INSERT +
+SELECT in bucket `media` only under an existing org's prefix (and the JWT `org_id` claim when present;
+`storage_worker_path_ok(name)`, no `..`); `service_role` everything in `media`; `authenticated` and
+`anon` nothing. Dashboard users and relay receivers only ever get ≤15-minute signed URLs minted by the
+server (`media_url` in relay payloads, `getVoiceOriginalUrl` "play original").
+
+| Function | Returns | Caller | Notes |
+|---|---|---|---|
+| `storage_worker_path_ok(p_name text)` | `bool` | W (policy) | Org-prefix guard used by the worker Storage policies. |
+| `media_purge_claim(p_n int=100)` | `table(id, bucket, path)` | S | `FOR UPDATE SKIP LOCKED`, 5-min lease, attempts + 1 (max 10). |
+| `media_purge_ack(p_ids uuid[], p_error text=null)` | `int` | S | No error → `purged_at`; error → released for retry with `last_error`. |
+
 ## 5. Realtime
 
 - Publication `supabase_realtime` (postgres_changes, RLS-checked per subscriber): `outbound_queue`,
@@ -180,6 +195,7 @@ runs the send gate (`reminders.dispatch`; text inside the 24h window, approved t
 | `gw-reminders` | every minute | `reminders_dispatch_due()` → `invoke_edge_function('reminders-dispatch')` when reminders are due |
 | `gw-pairing-purge` | every minute | `pairing_purge_expired()` (SQL only) |
 | `gw-retention` | daily 02:17 UTC | `retention_run()` (SQL only) |
+| `gw-media-purge` | every 10 minutes | `invoke_edge_function('media-purge')` when `media_purge_due()` |
 | `gw-relay-followups-purge` | daily 02:23 UTC | `relay_followups_purge()` (SQL only) |
 
 One-time Vault setup per project (SQL editor):
@@ -194,12 +210,15 @@ Edge Function env (`supabase secrets set ...`; `SUPABASE_URL`/`SUPABASE_SERVICE_
 |---|---|
 | all | `EDGE_CRON_SECRET` (= Vault `edge_cron_secret`) |
 | `heartbeat-alert` | `ALERT_EMAIL_API_KEY`, `ALERT_EMAIL_TO` (comma-separated; Tzvi's Gmail, never in the repo), `ALERT_EMAIL_FROM`, optional `ALERT_EMAIL_API_URL` (Resend-compatible, default `https://api.resend.com/emails`). Missing → dry-run (logs only). |
-| `cloud-retry`, `deliver-webhooks`, `reminders-dispatch` | `PUBLIC_BASE_URL`, `INTERNAL_API_SECRET` → `POST /api/internal/cloud-send` `{job_id, message_id, account_id, attempt, lease_until}` `POST /api/internal/reminders` `{reminder_id, lease_until}` and `POST /api/internal/deliver` `{kind: 'relay'\|'webhook'\|'relay_followup', id, attempt}` with header `x-internal-secret`. Vercel re-runs the send gate on every Cloud retry (S13: policy, key binding and 24h window may have changed; a rejection is `fail_job` permanent with the gate's code), performs the Graph call / HMAC-signed POST and records the result with `complete_job`/`fail_job` and `relay_batch_delivery_result`/`webhook_delivery_result`. |
+| `media-purge` | none beyond the injected service key: Storage API `DELETE /storage/v1/object/<bucket>` `{prefixes}`; logs counts only (paths contain message ids). |
+| `cloud-retry`, `deliver-webhooks`, `reminders-dispatch` | `PUBLIC_BASE_URL`, `INTERNAL_API_SECRET` → `POST /api/internal/cloud-send` `{job_id, message_id, account_id, attempt, lease_until}`, `POST /api/internal/reminders` `{reminder_id, lease_until}` and `POST /api/internal/deliver` `{kind: 'relay'\|'webhook'\|'relay_followup', id, attempt}` with header `x-internal-secret`. Vercel re-runs the send gate on every Cloud retry (S13: policy, key binding and 24h window may have changed; a rejection is `fail_job` permanent with the gate's code), performs the Graph call / HMAC-signed POST and records the result with `complete_job`/`fail_job` and `relay_batch_delivery_result`/`webhook_delivery_result`. |
 
 ## 7. Retention (S11, L6.4)
 
 Message bodies + transcripts 90 days, media paths 30 days (files queued in `media_purge_queue` for
-deletion through the Storage API; a direct `DELETE` on `storage.objects` would orphan them),
+deletion through the Storage API by the `media-purge` Edge Function, pg_cron `gw-media-purge` every
+10 minutes, claim/ack via `media_purge_claim` / `media_purge_ack`; "play original" then returns
+`media_purged`; a direct `DELETE` on `storage.objects` would orphan them),
 `inbound_events.raw` and delivered webhook payloads 7 days, `worker_logs`/`worker_heartbeats` 7 days,
 `login_attempts` 30 days, idle rate buckets 1 day, expired pairing rows. **`audit_log` is never touched.**
 

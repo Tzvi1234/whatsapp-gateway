@@ -68,6 +68,12 @@ the UI. For Realtime in client components get `{ url, anonKey }` from `publicSup
 | `revokeApiKey(id)` | `{ revoked }` | Confirm dialog. |
 | `listApiKeys()` | `ApiKeyView[]` | `{ id, name, prefix, scopes, accountIds, conversationIds, legacy, createdAt, expiresAt, revokedAt, lastUsedAt }`. Flag `legacy` keys "legacy, rotate". |
 
+## `actions/media.ts`
+
+| Action | Auth | Returns |
+|---|---|---|
+| `getVoiceOriginalUrl(messageId)` | member | `{ url, expiresInSeconds, mime }` — "play original" for a voice note (any stored media). Signed URL valid ≤15 min (S9): fetch it right before playing, never cache. `media_purged` after the 30-day retention ("ההקלטה המקורית כבר לא שמורה"), `media_unavailable` while Cloud media is not copied yet, `not_found`. |
+
 ## `actions/read-models.ts`
 
 | Action | Auth | Returns |
