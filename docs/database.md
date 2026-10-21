@@ -106,6 +106,7 @@ Caller: **W** = `gateway_worker`, **S** = `service_role`, **U** = `authenticated
 | `create_api_client(p_org_id uuid, p_name text, p_key_prefix text, p_key_hash text, p_scopes text[], p_account_ids uuid[]='{}', p_conversation_ids uuid[]=null, p_rate_limit jsonb=null, p_expires_at timestamptz=null, p_legacy bool=false, p_actor_user_id uuid=null, p_ip inet=null)` | `uuid` | S | Caller generates `gw_<prefix>_<secret>`, shows it once, passes `sha256(secret)` hex only. Audited. |
 | `revoke_api_client(p_id uuid, p_actor_user_id uuid=null, p_ip inet=null)` | `bool` | S | Audited. |
 | `lookup_api_client(p_key_prefix text)` | `table(id, org_id, name, key_hash, scopes, account_ids, conversation_ids, rate_limit, expires_at, legacy)` | S | Active keys only (revoked/expired → no row → fail closed). Compare with `timingSafeEqual`, then `api_client_touch(id)`. |
+| `lookup_legacy_api_client(p_key_hash text)` | same columns | S | Imported legacy WA-Automation tokens (`legacy=true`, `key_prefix` null): lookup by lowercase SHA-256 hex of the whole token (R3.3). |
 | `api_client_touch(p_id uuid)` | void | S | `last_used_at`, at most once a minute. |
 | `rate_limit_take(p_key text, p_capacity int, p_refill_per_sec double precision, p_cost int=1)` | `table(allowed, retry_after_ms, remaining)` | S | Token bucket; e.g. key `apikey:<id>:req`, capacity 60, refill 1/s. |
 | `login_check_lockout(p_email text, p_ip inet)` | `table(locked, retry_after_seconds)` | S | Call before Supabase Auth; 8 failures within 15 min per email+IP → locked 15 min. |
