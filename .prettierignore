@@ -7,3 +7,4 @@ docs/design
 *.md
 supabase/.temp
 .claude
+**/next-env.d.ts
