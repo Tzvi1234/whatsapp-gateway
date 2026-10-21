@@ -1,0 +1,14 @@
+# C14: triggered once by baileys-spike-restart.timer. Marks the restart in events.jsonl (so the
+# report can tell whether a re-pair was needed afterwards), then restarts the worker.
+
+[Unit]
+Description=Scheduled 36h restart of baileys-spike (C14)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/whatsapp-gateway/spikes/baileys7
+Environment=SPIKE_HOME=%h/baileys-spike
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+UMask=0077
+ExecStart=/usr/bin/env node dist/worker.mjs --mark-scheduled-restart
+ExecStart=/usr/bin/systemctl --user restart baileys-spike.service

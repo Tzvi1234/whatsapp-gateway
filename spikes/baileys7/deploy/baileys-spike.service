@@ -1,0 +1,44 @@
+# Baileys 7 spike worker (task 0.3, ADR-5). systemd --user unit on htz-home-01.
+# Runbook: docs/spike-baileys7.md. TEST NUMBER ONLY — never the number used by the legacy
+# WhatsApp-Automation unit (two sessions on one number conflict).
+#
+# Install: cp deploy/baileys-spike*.{service,timer} ~/.config/systemd/user/ && systemctl --user daemon-reload
+
+[Unit]
+Description=Baileys 7 spike worker (WhatsApp Gateway, test number only)
+Documentation=file:%h/whatsapp-gateway/docs/spike-baileys7.md
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=1h
+StartLimitBurst=20
+
+[Service]
+Type=simple
+WorkingDirectory=%h/whatsapp-gateway/spikes/baileys7
+# PAIRING_NUMBER, TEST_NUMBER, BLOCKED_NUMBERS, PROBE_INTERVAL_MIN (file mode 0600, never committed)
+EnvironmentFile=%h/.config/gateway/spike.env
+Environment=SPIKE_HOME=%h/baileys-spike
+Environment=NODE_ENV=production
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# 32-byte master key, 0400, outside the data dir. Exposed as $CREDENTIALS_DIRECTORY/session.key.
+LoadCredential=session.key:%h/.config/gateway/spike-session.key
+ExecStart=/usr/bin/env node dist/worker.mjs
+
+Restart=on-failure
+RestartSec=10s
+# exit-codes.ts: logged out, number guard, pairing required, conflict, bad session, config.
+RestartPreventExitStatus=41 42 43 44 50 78
+KillSignal=SIGTERM
+TimeoutStopSec=20s
+
+# Files created by the worker (session.sqlite, events.jsonl, pairing-code.txt) are 0600.
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=%h/baileys-spike
+MemoryLow=128M
+MemoryHigh=768M
+
+[Install]
+WantedBy=default.target

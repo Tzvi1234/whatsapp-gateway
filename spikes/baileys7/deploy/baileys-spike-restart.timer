@@ -1,0 +1,12 @@
+# C14: one-shot restart of the spike worker 36h after it is started.
+# Start it right after pairing succeeds (do NOT enable; it must fire once):
+#   systemctl --user start baileys-spike-restart.timer
+#   systemctl --user list-timers baileys-spike-restart.timer
+
+[Unit]
+Description=One-shot restart of baileys-spike 36h after pairing (C14)
+
+[Timer]
+OnActiveSec=36h
+AccuracySec=1min
+Unit=baileys-spike-restart.service
