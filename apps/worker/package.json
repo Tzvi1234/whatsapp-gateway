@@ -1,0 +1,26 @@
+{
+  "name": "@htz/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "node scripts/build.mjs",
+    "start": "node dist/main.mjs",
+    "dev": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@htz/automations": "workspace:*",
+    "@htz/core": "workspace:*",
+    "@htz/policy": "workspace:*",
+    "@htz/provider-baileys": "workspace:*",
+    "@htz/relay": "workspace:*",
+    "@supabase/supabase-js": "^2.118.0",
+    "baileys": "7.0.0-rc14",
+    "pino": "^10.4.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}

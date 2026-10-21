@@ -1,0 +1,19 @@
+title = "whatsapp-gateway gitleaks config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "gateway-api-key"
+description = "Gateway MCP API key (gw_<prefix>_<secret>)"
+regex = '''gw_[a-z0-9]{8}_[A-Za-z0-9_-]{32,}'''
+tags = ["key", "gateway"]
+
+[[rules]]
+id = "israeli-mobile-e164"
+description = "Real-looking Israeli mobile numbers must not be committed (use fictitious test numbers)"
+regex = '''\+9725[0-9]{8}'''
+tags = ["pii"]
+[rules.allowlist]
+regexes = ['''\+972559014410''', '''\+972500000\d{3}''']
+paths = ['''docs/design/''']

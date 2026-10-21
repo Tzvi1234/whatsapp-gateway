@@ -1,0 +1,17 @@
+name: branch name
+
+on:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Allowed prefixes feat/ fix/ spike/ docs/ (claude/ for agent sessions)
+        env:
+          HEAD: ${{ github.head_ref }}
+        run: |
+          case "$HEAD" in
+            feat/*|fix/*|spike/*|docs/*|claude/*) echo "ok: $HEAD";;
+            *) echo "::error::branch '$HEAD' must start with feat/, fix/, spike/ or docs/"; exit 1;;
+          esac

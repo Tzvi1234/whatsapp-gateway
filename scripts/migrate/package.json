@@ -1,0 +1,19 @@
+{
+  "name": "@htz/migrate",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "migrate": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@htz/core": "workspace:*",
+    "better-sqlite3": "^13.0.3",
+    "pg": "^8.16.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/pg": "^8.15.0"
+  }
+}

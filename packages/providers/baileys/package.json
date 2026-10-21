@@ -1,0 +1,21 @@
+{
+  "name": "@htz/provider-baileys",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@htz/core": "workspace:*",
+    "baileys": "7.0.0-rc14",
+    "better-sqlite3": "^13.0.3",
+    "pino": "^10.4.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13"
+  }
+}

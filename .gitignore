@@ -1,0 +1,22 @@
+node_modules/
+dist/
+.next/
+out/
+coverage/
+.turbo/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.vercel
+# Baileys session material equals full WhatsApp access. Never commit.
+auth/
+baileys-auth/
+session.sqlite*
+*.key
+pairing-code.txt
+qr.png
+*.jsonl
+__pycache__/
+.venv/
+supabase/.temp/

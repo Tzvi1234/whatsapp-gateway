@@ -1,0 +1,10 @@
+node_modules/
+dist/
+deploy/bundle/
+session.sqlite*
+auth/
+*.jsonl
+qr.png
+pairing-code.txt
+# Never commit session material — equals full WhatsApp access.
+# gitleaks: no secrets, pairing codes, or master keys in this tree.

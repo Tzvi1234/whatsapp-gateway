@@ -1,0 +1,11 @@
+packages:
+  - apps/*
+  - packages/*
+  - packages/providers/*
+  - spikes/*
+  - scripts/migrate
+onlyBuiltDependencies:
+  - better-sqlite3
+  - esbuild
+  - protobufjs
+  - sharp

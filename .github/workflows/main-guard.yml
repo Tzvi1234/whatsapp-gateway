@@ -1,0 +1,34 @@
+name: main push guard
+
+# GitHub Free cannot protect `main` on a private repo (TEST-PLAN RL9). This job fails, and the
+# failure email goes to the repo owner, when a commit lands on main that is not the merge of an
+# approved pull request.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify head commit came from an approved PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sha = context.sha;
+            const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner: context.repo.owner, repo: context.repo.repo, commit_sha: sha,
+            });
+            const merged = prs.find((p) => p.merged_at && p.base.ref === 'main');
+            if (!merged) core.setFailed(`Commit ${sha} on main is not the merge of a PR.`);
+            else {
+              const { data: reviews } = await github.rest.pulls.listReviews({
+                owner: context.repo.owner, repo: context.repo.repo, pull_number: merged.number,
+              });
+              if (!reviews.some((r) => r.state === 'APPROVED'))
+                core.setFailed(`PR #${merged.number} was merged without an approving review.`);
+            }
