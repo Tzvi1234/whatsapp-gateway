@@ -683,35 +683,28 @@ export function createMcpDeps(opts: McpDepsOptions = {}): McpDeps {
         if (!j.ok || j.value.kind !== 'pn' || !j.value.e164) {
           return err(gatewayError('invalid_number', 'reminder_requires_phone_number'));
         }
-        let state: ReminderState = 'scheduled';
-        if (acc.value.provider === 'meta_cloud') {
-          const c = await readCloudCredentials(db, acc.value.id);
-          if (!c.ok) return c;
-          if (!c.value?.accessToken || !c.value.phoneNumberId) state = 'unconfigured';
-        }
+        // Idempotent on (api_client_id, client_msg_id); `unconfigured` when a Cloud account has no
+        // credentials yet (R4.4). Sending happens later in the dispatcher, through the gate.
+        const c = await rpcRow<{ reminder_id: string; created: boolean }>(db, 'reminder_create', {
+          p_account_id: acc.value.id,
+          p_to_e164: j.value.e164,
+          p_due_at: req.dueAt,
+          p_body: req.text,
+          p_template_name: req.template?.name ?? null,
+          p_template_language: req.template?.language ?? null,
+          p_template_params: req.template?.params ?? [],
+          p_api_client_id: req.apiClientId,
+          p_client_reminder_id: req.clientMsgId,
+        });
+        if (!c.ok) return c;
+        if (!c.value) return err(gatewayError('internal', 'reminder_insert_no_row'));
         const r = await query<ReminderRow | null>(
-          db
-            .from('reminders')
-            .insert({
-              org_id: acc.value.org_id,
-              account_id: acc.value.id,
-              to_e164: j.value.e164,
-              body: req.text,
-              template_name: req.template?.name ?? null,
-              template_language: req.template?.language ?? null,
-              template_params: req.template?.params ?? [],
-              due_at: req.dueAt,
-              state,
-              api_client_id: req.apiClientId,
-            })
-            .select(REMINDER_COLUMNS)
-            .single(),
-          'reminders.create',
+          db.from('reminders').select(REMINDER_COLUMNS).eq('id', c.value.reminder_id).single(),
+          'reminders.get',
         );
         if (!r.ok) return r;
         if (!r.value) return err(gatewayError('internal', 'reminder_insert_no_row'));
-        // No idempotency column on reminders yet (see report): never claims a duplicate.
-        return ok({ reminder: toReminder(r.value), duplicate: false });
+        return ok({ reminder: toReminder(r.value), duplicate: !c.value.created });
       },
       async list(accountId, o) {
         let q = db.from('reminders').select(REMINDER_COLUMNS).eq('account_id', accountId);
@@ -724,7 +717,21 @@ export function createMcpDeps(opts: McpDepsOptions = {}): McpDeps {
       },
       async cancel(accountId, id) {
         if (!isUuid(id)) return err(gatewayError('not_found', 'reminder_not_found'));
-        const cur = await query<ReminderRow | null>(
+        // R4.6: only before the send (scheduled / unconfigured); otherwise a clear conflict.
+        const c = await rpc<string>(db, 'reminder_cancel', {
+          p_reminder_id: id,
+          p_account_id: accountId,
+        });
+        if (!c.ok) {
+          if (c.error.code !== 'conflict') return c;
+          const cur = await query<{ state: string } | null>(
+            db.from('reminders').select('state').eq('id', id).maybeSingle(),
+            'reminders.state',
+          );
+          const state = cur.ok ? (cur.value?.state ?? 'changed') : 'changed';
+          return err(gatewayError('conflict', `reminder_already_${state}`));
+        }
+        const r = await query<ReminderRow | null>(
           db
             .from('reminders')
             .select(REMINDER_COLUMNS)
@@ -733,24 +740,8 @@ export function createMcpDeps(opts: McpDepsOptions = {}): McpDeps {
             .maybeSingle(),
           'reminders.get',
         );
-        if (!cur.ok) return cur;
-        if (!cur.value) return err(gatewayError('not_found', 'reminder_not_found'));
-        if (cur.value.state !== 'scheduled' && cur.value.state !== 'unconfigured') {
-          return err(gatewayError('conflict', `reminder_already_${cur.value.state}`));
-        }
-        const r = await query<ReminderRow | null>(
-          db
-            .from('reminders')
-            .update({ state: 'cancelled', cancelled_at: now().toISOString() })
-            .eq('id', id)
-            .eq('account_id', accountId)
-            .in('state', ['scheduled', 'unconfigured'])
-            .select(REMINDER_COLUMNS)
-            .maybeSingle(),
-          'reminders.cancel',
-        );
         if (!r.ok) return r;
-        if (!r.value) return err(gatewayError('conflict', 'reminder_state_changed'));
+        if (!r.value) return err(gatewayError('not_found', 'reminder_not_found'));
         return ok(toReminder(r.value));
       },
     },

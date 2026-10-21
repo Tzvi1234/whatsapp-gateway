@@ -113,8 +113,8 @@ select isnt(public.invoke_edge_function('heartbeat-alert'), null, 'R4.8/RL5 cron
 select ok(to_regclass('net.http_request_queue') is null or exists (
   select 1 from net.http_request_queue where url = 'https://example-ref.supabase.co/functions/v1/heartbeat-alert'
     and headers ->> 'x-cron-secret' = 'cron-secret-test'), 'request targets the function with the secret header');
-select is((select count(*)::int from cron.job where jobname like 'gw-%' and schedule = '* * * * *'), 5,
-  'R4.8 / RL5 five every-minute jobs scheduled');
+select is((select count(*)::int from cron.job where jobname like 'gw-%' and schedule = '* * * * *'), 6,
+  'R4.8 / RL5 six every-minute jobs scheduled (incl. gw-reminders)');
 
 select * from finish();
 rollback;

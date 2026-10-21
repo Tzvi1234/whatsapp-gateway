@@ -33,7 +33,7 @@ Region: EU Frankfurt (deploy concern only).
 | `session_commands` | reconnect/logout/pair/mark_read, consumed by the worker; `payload` jsonb (mark_read: `{chat, ids[1..100]}`, CHECK) |
 | `inbound_events` | unique `dedupe_key`; `raw` purged after 7 days |
 | `automations`, `automation_cooldowns`, `statuses`, `reply_jobs` | Status-reply automations; cooldown unique `(account_id, provider_status_id, contact_key)` = one reply per contact per status |
-| `reminders` | `state` incl. `unconfigured`; idx `(state, due_at)` |
+| `reminders` | `state` incl. `unconfigured`; idx `(state, due_at)`; unique `(api_client_id, client_reminder_id)` (MCP `client_msg_id`); `message_id` + trigger: state follows the message status; dispatch lease `lease_owner`/`lease_until`; `error_code`/`error_detail` (gate reason, R4.2) |
 | `relay_targets` | `url` (https), Vault secret + last4, `debounce_ms` 3000-5000 (default 4000), `no_reply_threshold_min` in (5,10,30) default 10, `allowed_senders` (E.164 CHECK), `last_verified_at` (null = "untested"), `last_test` (status CHECK) |
 | `relay_batches` | `batch_id` unique (Idempotency-Key), `message_ids uuid[]`, `status` CHECK = exactly the 6 canonical values (null = not delivered yet), `is_test`, `attempts`, `accepted_at`, `first_response_at`, `replied_at`, `reply_message_id` (Lia's reply, set by `relay_mark_replied`) |
 | `relay_followups` | Transcript follow-up events (L3.4) to the relay target: unique `(batch_id, message_id, event)`, `transcript` (null = failed), `status` pending/delivered/failed/dead, retries like webhooks; delivered only after the batch itself; finished rows purged after 7 days |
@@ -109,6 +109,20 @@ Caller: **W** = `gateway_worker`, **S** = `service_role`, **U** = `authenticated
 | `worker_log(p_org_id uuid, p_worker_id text, p_entries jsonb)` | `int` | W | `[{level,msg,correlation_id,data,at}]`, already redacted. |
 | `audit_append(p_org_id uuid, p_actor_type text, p_actor_id text, p_action text, p_target text=null, p_ip inet=null, p_meta jsonb='{}')` | `uuid` | W, S | The only write path into `audit_log`. |
 
+### Reminders (R4.1-R4.6)
+| Function | Returns | Caller | Notes |
+|---|---|---|---|
+| `reminder_create(p_account_id uuid, p_to_e164 text, p_due_at timestamptz, p_body text=null, p_template_name text=null, p_template_language text=null, p_template_params jsonb='[]', p_api_client_id uuid=null, p_client_reminder_id text=null, p_created_by uuid=null)` | `table(reminder_id, created)` | S | Idempotent on `(api_client_id, client_reminder_id)` (`created=false` → MCP `duplicate: true`). Cloud account without credentials → `unconfigured`. |
+| `reminders_dispatch_due()` | `int` due | S, cron | Every minute: due reminders of unconfigured Cloud accounts → `unconfigured` (attempts untouched, R4.4); `unconfigured` with credentials → `scheduled`; anything due → `invoke_edge_function('reminders-dispatch')`. |
+| `reminders_claim_due(p_worker_id text, p_n int=20)` | `table(reminder_id, account_id, attempts, lease_until)` | S | `FOR UPDATE SKIP LOCKED`; due `scheduled` (or `sending` with no message and an expired lease) → `sending`, 60 s lease. |
+| `reminder_record_dispatch(p_reminder_id uuid, p_message_id uuid=null, p_error_code text=null, p_detail text=null, p_unconfigured bool=false)` | `text` state | S | Only while `sending` without a message (else idempotent no-op). Message → linked, attempt +1, state = message status; error → `failed` + reason, attempt +1; unconfigured → no attempt. |
+| `reminder_cancel(p_reminder_id uuid, p_account_id uuid)` | `text` | S | R4.6: only `scheduled`/`unconfigured`; otherwise 55000 `reminder_already_<state>`. |
+
+The send itself is never done in SQL: Vercel `POST /api/internal/reminders` `{reminder_id, lease_until}`
+runs the send gate (`reminders.dispatch`; text inside the 24h window, approved template outside, else
+`outside_24h_window`), then `enqueue_message` with idempotency key `reminder:<id>` (Cloud: Graph send +
+`message_record_send_result`; Baileys: worker job, gated again by the worker).
+
 ### Server (Vercel / Edge Functions)
 | Function | Returns | Caller | Notes |
 |---|---|---|---|
@@ -163,6 +177,7 @@ Caller: **W** = `gateway_worker`, **S** = `service_role`, **U** = `authenticated
 | `gw-cloud-retry` | every minute | `invoke_edge_function('cloud-retry')` when `edge_jobs_due()` |
 | `gw-deliver-webhooks` | every minute | `invoke_edge_function('deliver-webhooks')` when `deliveries_due()` (also kicked on insert) |
 | `gw-relay-no-reply` | every minute | `relay_evaluate_no_reply()` (SQL only) |
+| `gw-reminders` | every minute | `reminders_dispatch_due()` → `invoke_edge_function('reminders-dispatch')` when reminders are due |
 | `gw-pairing-purge` | every minute | `pairing_purge_expired()` (SQL only) |
 | `gw-retention` | daily 02:17 UTC | `retention_run()` (SQL only) |
 | `gw-relay-followups-purge` | daily 02:23 UTC | `relay_followups_purge()` (SQL only) |
@@ -179,7 +194,7 @@ Edge Function env (`supabase secrets set ...`; `SUPABASE_URL`/`SUPABASE_SERVICE_
 |---|---|
 | all | `EDGE_CRON_SECRET` (= Vault `edge_cron_secret`) |
 | `heartbeat-alert` | `ALERT_EMAIL_API_KEY`, `ALERT_EMAIL_TO` (comma-separated; Tzvi's Gmail, never in the repo), `ALERT_EMAIL_FROM`, optional `ALERT_EMAIL_API_URL` (Resend-compatible, default `https://api.resend.com/emails`). Missing → dry-run (logs only). |
-| `cloud-retry`, `deliver-webhooks` | `PUBLIC_BASE_URL`, `INTERNAL_API_SECRET` → `POST /api/internal/cloud-send` `{job_id, message_id, account_id, attempt, lease_until}` and `POST /api/internal/deliver` `{kind: 'relay'\|'webhook'\|'relay_followup', id, attempt}` with header `x-internal-secret`. Vercel re-runs the send gate on every Cloud retry (S13: policy, key binding and 24h window may have changed; a rejection is `fail_job` permanent with the gate's code), performs the Graph call / HMAC-signed POST and records the result with `complete_job`/`fail_job` and `relay_batch_delivery_result`/`webhook_delivery_result`. |
+| `cloud-retry`, `deliver-webhooks`, `reminders-dispatch` | `PUBLIC_BASE_URL`, `INTERNAL_API_SECRET` → `POST /api/internal/cloud-send` `{job_id, message_id, account_id, attempt, lease_until}` `POST /api/internal/reminders` `{reminder_id, lease_until}` and `POST /api/internal/deliver` `{kind: 'relay'\|'webhook'\|'relay_followup', id, attempt}` with header `x-internal-secret`. Vercel re-runs the send gate on every Cloud retry (S13: policy, key binding and 24h window may have changed; a rejection is `fail_job` permanent with the gate's code), performs the Graph call / HMAC-signed POST and records the result with `complete_job`/`fail_job` and `relay_batch_delivery_result`/`webhook_delivery_result`. |
 
 ## 7. Retention (S11, L6.4)
 
