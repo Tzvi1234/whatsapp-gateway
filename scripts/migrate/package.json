@@ -10,7 +10,8 @@
   "dependencies": {
     "@htz/core": "workspace:*",
     "better-sqlite3": "^13.0.3",
-    "pg": "^8.16.0"
+    "pg": "^8.16.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
