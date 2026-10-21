@@ -152,6 +152,75 @@ describe('SessionManager', () => {
     expect(t.db.callsOf('completeSessionCommand')[1]).toEqual(['c2', 'done', 'logged_out']);
   });
 
+  it('R3.1 mark_read command: read receipts sent on the held socket; never starts a session', async () => {
+    const t = setup();
+    await t.mgr.start();
+    t.sessions[0]!.state = 'open';
+    await t.mgr.handleCommand({
+      id: 'm1',
+      account_id: ACC,
+      command: 'mark_read',
+      state: 'pending',
+      created_at: '',
+      payload: { chat: TZVI_PN, ids: ['WAID1', 'WAID2'] },
+    });
+    expect(t.sessions[0]!.callsOf('markRead')).toEqual([[TZVI_PN, ['WAID1', 'WAID2']]]);
+    expect(t.db.callsOf('completeSessionCommand')[0]).toEqual(['m1', 'done', 'marked:2']);
+    expect(t.sessions).toHaveLength(1);
+    expect(t.lines.join('\n')).not.toContain('WAID1');
+
+    t.sessions[0]!.state = 'connecting';
+    await t.mgr.handleCommand({
+      id: 'm2',
+      account_id: ACC,
+      command: 'mark_read',
+      state: 'pending',
+      created_at: '',
+      payload: { chat: TZVI_PN, ids: ['WAID3'] },
+    });
+    expect(t.db.callsOf('completeSessionCommand')[1]).toEqual([
+      'm2',
+      'failed',
+      'session_disconnected',
+    ]);
+
+    await t.mgr.handleCommand({
+      id: 'm3',
+      account_id: ACC,
+      command: 'mark_read',
+      state: 'pending',
+      created_at: '',
+      payload: { chat: TZVI_PN, ids: [] },
+    });
+    expect(t.db.callsOf('completeSessionCommand')[2]).toEqual(['m3', 'failed', 'invalid_payload']);
+  });
+
+  it('R3.1 mark_read for an account no worker runs → failed not_running (lock released); held elsewhere → left pending', async () => {
+    const t = setup();
+    await t.mgr.handleCommand({
+      id: 'm4',
+      account_id: ACC,
+      command: 'mark_read',
+      state: 'pending',
+      created_at: '',
+      payload: { chat: TZVI_PN, ids: ['WAID1'] },
+    });
+    expect(t.sessions).toHaveLength(0);
+    expect(t.db.callsOf('unlockAccount')).toHaveLength(1);
+    expect(t.db.callsOf('completeSessionCommand')[0]).toEqual(['m4', 'failed', 'not_running']);
+
+    const u = setup({ lock: false });
+    await u.mgr.handleCommand({
+      id: 'm5',
+      account_id: ACC,
+      command: 'mark_read',
+      state: 'pending',
+      created_at: '',
+      payload: { chat: TZVI_PN, ids: ['WAID1'] },
+    });
+    expect(u.db.callsOf('completeSessionCommand')).toHaveLength(0);
+  });
+
   it('graceful stop closes sockets without logout and releases locks', async () => {
     const t = setup();
     await t.mgr.start();

@@ -30,7 +30,7 @@ Region: EU Frankfurt (deploy concern only).
 | `conversations` | unique `(account_id, chat_jid)`; `last_inbound_at` (24h window); idx `(account_id, last_message_at desc)` |
 | `messages` | unique `(account_id, provider_message_id)`, unique `(api_client_id, idempotency_key)`, idx `(conversation_id, created_at desc)`, partial idx `status in (queued, failed)`; `relay_state` pending/batched/skipped |
 | `outbound_queue` | `executor` worker/edge, `state` ready/leased/done/dead, lease, `seq` (FIFO); partial idx `(executor, run_at) where state='ready'`; `max_attempts` 6 = 1 + 5 retries |
-| `session_commands` | reconnect/logout/pair, consumed by the worker |
+| `session_commands` | reconnect/logout/pair/mark_read, consumed by the worker; `payload` jsonb (mark_read: `{chat, ids[1..100]}`, CHECK) |
 | `inbound_events` | unique `dedupe_key`; `raw` purged after 7 days |
 | `automations`, `automation_cooldowns`, `statuses`, `reply_jobs` | Status-reply automations; cooldown unique `(account_id, provider_status_id, contact_key)` = one reply per contact per status |
 | `reminders` | `state` incl. `unconfigured`; idx `(state, due_at)` |
@@ -126,6 +126,7 @@ Caller: **W** = `gateway_worker`, **S** = `service_role`, **U** = `authenticated
 | `provider_credentials_read(p_account_id uuid)` | `table(phone_number_id, waba_id, access_token, app_secret, verify_token)` | S | For the Graph call / webhook verify only. Never return to clients. |
 | `provider_credentials_mark_webhook_verified(p_account_id uuid, p_url text)` | `bool` | S | C15 banner baseline. |
 | `request_session_command(p_account_id uuid, p_command text, p_requested_by uuid=null, p_via text='dashboard', p_ip inet=null)` | `uuid` | S | Dashboard Reconnect / MCP `session_reconnect`. Audited. |
+| `request_mark_read(p_account_id uuid, p_chat text, p_ids text[], p_via text='mcp')` | `uuid` | S | MCP `mark_read` on a Baileys account → `session_commands` `mark_read` (worker sends the read receipts). Cloud accounts use the Graph read receipt instead. |
 | `create_pairing_request(p_account_id uuid, p_requested_by uuid, p_method text='qr', p_phone_e164 text=null, p_ip inet=null)` | `uuid` | S | Cancels older requests + QR rows. Audited. |
 | `relay_set_target(p_account_id uuid, p_name text, p_url text, p_secret text=null, p_debounce_ms int=null, p_no_reply_threshold_min int=null, p_enabled bool=null, p_actor_user_id uuid=null, p_ip inet=null)` | `uuid` | S | Upsert by `(account_id, name)`. Secret → Vault. A changed URL or key resets `last_verified_at` to null (L5.5). Run the outbound URL guard before calling. Audited before/after (masked). |
 | `relay_allowlist_update(p_relay_target_id uuid, p_allowed_senders text[], p_actor_user_id uuid, p_confirmed bool, p_ip inet=null)` | `text[]` | S | Requires `p_confirmed=true`; E.164 only; audit row with before/after (L6.1). The **only** way to change `relay_targets.allowed_senders` (a trigger rejects direct writes with 42501, even for service_role). |

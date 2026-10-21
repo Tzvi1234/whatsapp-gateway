@@ -58,8 +58,10 @@ export interface ClaimedJob {
 export interface SessionCommandRow {
   id: string;
   account_id: string;
-  command: 'reconnect' | 'logout' | 'pair';
+  command: 'reconnect' | 'logout' | 'pair' | 'mark_read';
   state: string;
+  /** mark_read: {"chat": "<jid>", "ids": ["<provider message id>", ...]}; else null. */
+  payload?: Record<string, unknown> | null;
   created_at: string;
 }
 

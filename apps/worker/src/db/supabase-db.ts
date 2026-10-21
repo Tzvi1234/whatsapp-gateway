@@ -132,7 +132,7 @@ export function createSupabaseWorkerDb(client: SupabaseClient): WorkerDb {
     async listPendingSessionCommands(orgId) {
       const r = await client
         .from('session_commands')
-        .select('id, account_id, command, state, created_at')
+        .select('id, account_id, command, state, created_at, payload')
         .eq('org_id', orgId)
         .eq('state', 'pending')
         .order('created_at');

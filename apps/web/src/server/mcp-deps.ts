@@ -564,17 +564,30 @@ export function createMcpDeps(opts: McpDepsOptions = {}): McpDeps {
         return err(gatewayError('capability_unsupported', 'message_edit_not_implemented'));
       },
 
-      async markRead(accountId, _chat, messageIds) {
+      async markRead(accountId, chat, messageIds) {
         const acc = await accountRef(accountId);
         if (!acc.ok) return acc;
-        if (acc.value.provider !== 'meta_cloud') {
-          return err(gatewayError('capability_unsupported', 'mark_read_requires_worker_command'));
-        }
+        const providerIds: string[] = [];
         for (const ref of messageIds) {
           const m = await findAccountMessage(db, accountId, ref);
           if (!m.ok) return m;
           const providerId = m.value?.provider_message_id ?? (isUuid(ref) ? null : ref);
           if (!providerId) return err(gatewayError('not_found', 'message_not_found'));
+          providerIds.push(providerId);
+        }
+        if (acc.value.provider === 'baileys') {
+          // The socket lives in the worker: queue a `mark_read` session command (async receipt).
+          const j = normalizeJid(chat);
+          if (!j.ok) return err(gatewayError('invalid_input', 'bad_chat'));
+          const r = await rpc<string>(db, 'request_mark_read', {
+            p_account_id: accountId,
+            p_chat: j.value.jid,
+            p_ids: providerIds,
+            p_via: 'mcp',
+          });
+          return r.ok ? ok(undefined) : r;
+        }
+        for (const providerId of providerIds) {
           const r = await cloud().readReceipt(accountId, providerId);
           if (!r.ok) return r;
         }

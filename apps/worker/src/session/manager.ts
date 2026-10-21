@@ -396,6 +396,10 @@ export class SessionManager {
     this.#busyCommands.add(c.id);
     const log = this.#d.log.child({ account: hashId(c.account_id), command: c.command });
     try {
+      if (c.command === 'mark_read') {
+        await this.#markRead(c, log);
+        return;
+      }
       let e = this.#entries.get(c.account_id);
       if (!e) {
         // Only act if we can own the account; otherwise leave it for the worker that does.
@@ -436,6 +440,34 @@ export class SessionManager {
     } finally {
       this.#busyCommands.delete(c.id);
     }
+  }
+
+  /** MCP mark_read (read receipts) on the socket this worker holds. Ids never logged. */
+  async #markRead(c: SessionCommandRow, log: Logger): Promise<void> {
+    const chat = typeof c.payload?.chat === 'string' ? c.payload.chat : null;
+    const rawIds = Array.isArray(c.payload?.ids) ? (c.payload.ids as unknown[]) : [];
+    const ids = rawIds.filter((x): x is string => typeof x === 'string' && x.length > 0);
+    const target = chat ? normalizeJid(chat) : null;
+    if (!target?.ok || ids.length === 0) {
+      await this.#d.db.completeSessionCommand(c.id, 'failed', 'invalid_payload');
+      return;
+    }
+    const e = this.#entries.get(c.account_id);
+    if (!e) {
+      // Not ours unless nobody holds the account: then nobody can mark it read right now.
+      const ok = await this.#d.db.tryLockAccount(c.account_id, this.#d.workerId, this.ttlSeconds);
+      if (!ok) return;
+      await this.#d.db.unlockAccount(c.account_id, this.#d.workerId).catch(() => undefined);
+      await this.#d.db.completeSessionCommand(c.id, 'failed', 'not_running');
+      return;
+    }
+    if (e.session.state !== 'open') {
+      await this.#d.db.completeSessionCommand(c.id, 'failed', 'session_disconnected');
+      return;
+    }
+    await e.session.markRead(target.value.jid, ids);
+    await this.#d.db.completeSessionCommand(c.id, 'done', `marked:${ids.length}`);
+    log.info({ n: ids.length }, 'session_command_done');
   }
 
   async handlePairingRequest(r: PairingRequestRow): Promise<void> {
