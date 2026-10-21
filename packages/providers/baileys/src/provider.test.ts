@@ -73,6 +73,33 @@ describe('BaileysProvider', () => {
     expect(s.sendMessage).toHaveBeenCalledWith(JID, { text: 'hello' }, {});
   });
 
+  it('RL2 send with a reserved messageId passes it to the session (text, quoted and reaction)', async () => {
+    const s = fakeSession();
+    const p = provider();
+    p.register(s as unknown as ProviderSession);
+    await p.send(msg(), { messageId: '3EB0RESERVED1' });
+    expect(s.sendMessage).toHaveBeenLastCalledWith(
+      JID,
+      { text: 'hello' },
+      { messageId: '3EB0RESERVED1' },
+    );
+    await p.send(msg({ kind: 'reaction', reaction: { targetProviderId: 'T1', emoji: '👍' } }), {
+      messageId: '3EB0RESERVED2',
+    });
+    expect(s.react).toHaveBeenLastCalledWith(JID, 'T1', '👍', { messageId: '3EB0RESERVED2' });
+  });
+
+  it('RL2 newMessageId / wasSent: null when no session can tell', async () => {
+    const p = provider();
+    expect(p.newMessageId('acc-1')).toMatch(/^[0-9A-F]{8,}$/);
+    expect(await p.wasSent('acc-1', 'X')).toBeNull();
+    const s = fakeSession();
+    const withStore = Object.assign(s, { wasSent: vi.fn(async (id: string) => id === 'SENT1') });
+    p.register(withStore as unknown as ProviderSession);
+    expect(await p.wasSent('acc-1', 'SENT1')).toBe(true);
+    expect(await p.wasSent('acc-1', 'OTHER')).toBe(false);
+  });
+
   it('RL7 templates → capability_unsupported (never silently sent)', async () => {
     const p = provider();
     const s = fakeSession();

@@ -57,10 +57,12 @@ function setup(opts: { pairing?: 'qr' | 'code'; store?: SessionStore } = {}) {
       handlers: [],
       user: undefined,
       requestPairingCode: vi.fn(async () => PAIRING_CODE),
-      sendMessage: vi.fn(async (jid: string, content: { text?: string }) => ({
-        key: { remoteJid: jid, id: `3EB0${++msgSeq}`, fromMe: true },
-        message: { conversation: content.text ?? '' },
-      })),
+      sendMessage: vi.fn(
+        async (jid: string, content: { text?: string }, misc?: { messageId?: string }) => ({
+          key: { remoteJid: jid, id: misc?.messageId ?? `3EB0${++msgSeq}`, fromMe: true },
+          message: { conversation: content.text ?? '' },
+        }),
+      ),
       readMessages: vi.fn(async () => undefined),
       sendPresenceUpdate: vi.fn(async () => undefined),
       logout: vi.fn(async () => undefined),
@@ -361,6 +363,18 @@ describe('BaileysSession', () => {
     const { id } = await t.session.sendText(PEER_PN, 'hello');
     expect((await t.store.getSentMessage(id))?.conversation).toBe('hello');
     expect((await t.last().config.getMessage!({ id }))?.conversation).toBe('hello');
+  });
+
+  it('RL2 sendMessage with a pre-generated id sends with exactly that id; wasSent reflects the store', async () => {
+    await t.session.start();
+    await t.open();
+    const id = t.session.newMessageId();
+    expect(id).toMatch(/^[0-9A-F]{8,}$/);
+    expect(await t.session.wasSent(id)).toBe(false);
+    const sent = await t.session.sendText(PEER_PN, 'hello', { messageId: id });
+    expect(sent.id).toBe(id);
+    expect(t.last().sendMessage.mock.calls.at(-1)![2].messageId).toBe(id);
+    expect(await t.session.wasSent(id)).toBe(true);
   });
 
   it('quoting uses the inbound cache or own sent messages; unknown quoted id rejects', async () => {

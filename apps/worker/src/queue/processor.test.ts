@@ -52,6 +52,7 @@ function setup(
     sendResult?: SendResult;
     pacer?: Pacer | null;
     policy?: Record<string, unknown>;
+    wasSent?: boolean | null;
   } = {},
 ) {
   const db = new FakeDb();
@@ -84,7 +85,7 @@ function setup(
     },
   };
   const provider = {
-    send: vi.fn(async (m: OutboundMessage) => {
+    send: vi.fn(async (m: OutboundMessage, _opts?: { messageId?: string }) => {
       order.push('send');
       sent.push(m);
       return (
@@ -96,6 +97,10 @@ function setup(
       );
     }),
     setPresence: vi.fn(async () => undefined),
+    newMessageId: vi.fn(() => '3EB0GENERATED'),
+    wasSent: vi.fn(async (): Promise<boolean | null> =>
+      opts.wasSent === undefined ? false : opts.wasSent,
+    ),
   };
   const deps: QueueDeps = {
     db,
@@ -116,12 +121,61 @@ function setup(
 afterEach(() => vi.useRealTimers());
 
 describe('QueueProcessor', () => {
-  it('RL2 a job whose message already has a provider id is completed without resending', async () => {
-    const { db, provider, processor } = setup();
+  it('RL2 reserved id already sent from this device → completed without resending', async () => {
+    const { db, provider, processor } = setup({ wasSent: true });
     const out = await processor.process(job({ provider_message_id: 'WA-EXISTING' }));
     expect(out).toBe('completed_existing');
+    expect(provider.wasSent).toHaveBeenCalledWith(ACC, 'WA-EXISTING');
     expect(provider.send).not.toHaveBeenCalled();
     expect(db.callsOf('completeJob')[0]?.[1]).toBe('WA-EXISTING');
+  });
+
+  it('RL2 reserved but never sent → resent with the SAME id (no new reservation), then completed', async () => {
+    const { db, provider, processor } = setup({
+      wasSent: false,
+      sendResult: { ok: true, providerMessageId: 'WA-RESERVED', deliveryMode: 'text' },
+    });
+    const out = await processor.process(job({ provider_message_id: 'WA-RESERVED' }));
+    expect(out).toBe('sent');
+    expect(provider.send).toHaveBeenCalledOnce();
+    expect(provider.send.mock.calls[0]?.[1]).toEqual({ messageId: 'WA-RESERVED' });
+    expect(db.callsOf('reserveProviderId')).toHaveLength(0);
+    expect(db.callsOf('completeJob')[0]?.[1]).toBe('WA-RESERVED');
+  });
+
+  it('RL2 reserved id but no session can verify it → transient retry, never a blind resend', async () => {
+    const { db, provider, processor } = setup({ wasSent: null });
+    expect(await processor.process(job({ provider_message_id: 'WA-RESERVED' }))).toBe(
+      'rescheduled',
+    );
+    expect(provider.send).not.toHaveBeenCalled();
+    expect(db.callsOf('failJob')[0]?.slice(1, 4)).toEqual([
+      'session_disconnected',
+      true,
+      'rl2_unverified',
+    ]);
+  });
+
+  it('RL2 fresh job: id generated → job_reserve_provider_id → send with that id → complete_job', async () => {
+    const { db, provider, processor, order } = setup({
+      sendResult: { ok: true, providerMessageId: '3EB0GENERATED', deliveryMode: 'text' },
+    });
+    const j = job();
+    expect(await processor.process(j)).toBe('sent');
+    expect(db.callsOf('reserveProviderId')[0]).toEqual([j.job_id, 'w1', '3EB0GENERATED']);
+    expect(provider.send.mock.calls[0]?.[1]).toEqual({ messageId: '3EB0GENERATED' });
+    expect(order).toEqual(['gate:relay.reply', 'send']);
+    const reserveAt = db.calls.findIndex((c) => c.fn === 'reserveProviderId');
+    const completeAt = db.calls.findIndex((c) => c.fn === 'completeJob');
+    expect(reserveAt).toBeGreaterThanOrEqual(0);
+    expect(completeAt).toBeGreaterThan(reserveAt);
+  });
+
+  it('RL2 reservation refused (lease lost) → nothing sent', async () => {
+    const { db, provider, processor } = setup();
+    db.reserveProviderId = async () => false;
+    expect(await processor.process(job())).toBe('lease_lost');
+    expect(provider.send).not.toHaveBeenCalled();
   });
 
   it('sends through the gate and completes with the provider id; Lia Markdown is converted (L3.11)', async () => {

@@ -1,9 +1,9 @@
 /**
  * Outbound queue executor for Baileys accounts (ARCH §4.2, §8.1, §8.2; ADR-2).
  *
- * Per claimed job: provider id already set → complete only (RL2) → account facts → THE send gate
- * (S13) → session up? → pacing (wait with lease renewals, or reschedule) → provider send →
- * complete_job / fail_job. Every worker send path (MCP/dashboard jobs, Lia replies, relay system
+ * Per claimed job: reserved provider id already sent → complete only (RL2) → account facts → THE
+ * send gate (S13) → session up? → pacing (wait with lease renewals, or reschedule) → reserve the
+ * WhatsApp id (`job_reserve_provider_id`) → provider send with that id → complete_job / fail_job. Every worker send path (MCP/dashboard jobs, Lia replies, relay system
  * replies, status replies, reminders) arrives here, so this is the only place the worker sends.
  */
 import {
@@ -12,6 +12,7 @@ import {
   type GatewayErrorCode,
   type OutboundKind,
   type OutboundMessage,
+  type SendResult,
   type UseCase,
   type WhatsAppProvider,
 } from '@htz/core';
@@ -31,13 +32,20 @@ export interface QueueDeps {
     WorkerDb,
     | 'claimJobs'
     | 'renewLease'
+    | 'reserveProviderId'
     | 'completeJob'
     | 'failJob'
     | 'getConversation'
     | 'relayDeliveryFailed'
   >;
   gate: SendGate;
-  provider: Pick<WhatsAppProvider, 'send' | 'setPresence'>;
+  provider: Pick<WhatsAppProvider, 'setPresence'> & {
+    /** `opts.messageId`: send with this reserved WhatsApp id (RL2). */
+    send(msg: OutboundMessage, opts?: { messageId?: string }): Promise<SendResult>;
+    newMessageId(accountId: string): string;
+    /** Was this id already sent from the account's device? null = cannot tell. */
+    wasSent(accountId: string, id: string): Promise<boolean | null>;
+  };
   accounts: AccountDirectory;
   /** Connection state of the session this worker holds for the account, null if none. */
   sessionState(accountId: string): ConnectionState | null;
@@ -162,14 +170,25 @@ export class QueueProcessor {
   async #process(job: ClaimedJob, log: Logger): Promise<JobOutcome> {
     const d = this.#d;
 
-    // RL2: a previous attempt already sent it (or reserved the id) → complete, never resend.
+    const entry = entryPointForJob(job);
+
+    // RL2: a previous attempt reserved this id (job_reserve_provider_id) and then crashed or lost
+    // the lease. Sent from this device (store's sent-message record) → complete only. Not sent →
+    // resend below with the SAME id (WhatsApp dedupes by id). Cannot tell → retry later.
+    let reservedId: string | null = null;
     if (job.provider_message_id) {
-      await d.db.completeJob(job.job_id, job.provider_message_id, job.delivery_mode);
-      log.info({}, 'job_completed_existing');
-      return 'completed_existing';
+      const sent = await d.provider.wasSent(job.account_id, job.provider_message_id);
+      if (sent === true) {
+        await d.db.completeJob(job.job_id, job.provider_message_id, job.delivery_mode);
+        log.info({}, 'job_completed_existing');
+        return 'completed_existing';
+      }
+      if (sent === null)
+        return this.#fail(job, 'session_disconnected', true, 'rl2_unverified', log, entry);
+      reservedId = job.provider_message_id;
+      log.warn({}, 'job_resend_reserved_id');
     }
 
-    const entry = entryPointForJob(job);
     const ctx = await d.accounts.get(job.account_id);
     if (!ctx) return this.#fail(job, 'not_found', false, 'account', log, entry);
     if (!job.chat_jid) return this.#fail(job, 'invalid_input', false, 'no_chat', log, entry);
@@ -273,7 +292,18 @@ export class QueueProcessor {
     if (job.quoted_provider_id && kind !== 'reaction')
       msg.quotedProviderId = job.quoted_provider_id;
 
-    const res = await d.provider.send(msg);
+    // RL2: reserve the WhatsApp id BEFORE sending, so a crash between send and complete_job
+    // can never produce a second, different message.
+    let messageId = reservedId;
+    if (!messageId) {
+      messageId = d.provider.newMessageId(job.account_id);
+      if (!(await d.db.reserveProviderId(job.job_id, d.workerId, messageId))) {
+        log.warn({}, 'reserve_failed_lease_lost');
+        return 'lease_lost';
+      }
+    }
+
+    const res = await d.provider.send(msg, { messageId });
     if (res.ok && res.providerMessageId) {
       const mode =
         job.delivery_mode ??

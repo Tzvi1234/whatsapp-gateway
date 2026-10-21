@@ -16,7 +16,7 @@ WhatsApp, and the local `gateway-transcriber` unix socket.
 | `src/config.ts` | zod-parsed env, fail fast; refuses a `service_role` JWT. |
 | `src/db/` | `WorkerDb`: one method per worker RPC / RLS select (`supabase-db.ts`), `baileys_auth_state` adapter (`auth-state-db.ts`, bytea `\x…` ↔ bytes), Realtime wake-ups (`realtime.ts`). |
 | `src/session/` | `SessionManager`: per-account lease (`worker_try_lock_account`, renewed every 25 s, refused → socket closed), session events, commands (`reconnect`, `logout`, `pair`, `mark_read` = read receipts from MCP on the held socket; `not_running` / `session_disconnected` otherwise), pairing (QR / pairing code). `accounts.ts`: policy/capabilities/relay allowlist per account. |
-| `src/queue/` | `QueueProcessor`: `claim_jobs` → RL2 check → **send gate** → session check → pacing → send → `complete_job`/`fail_job`. Realtime INSERT wake-up + 30-60 s poll. `outbox.ts`: replies the worker originates are enqueued, never sent directly. |
+| `src/queue/` | `QueueProcessor`: `claim_jobs` → RL2 check (reserved id already in the device's sent store → complete; not sent → resend with the same id; no session to tell → retry later) → **send gate** → session check → pacing → `job_reserve_provider_id` (fresh `generateMessageIDV2`) → send with that `messageId` → `complete_job`/`fail_job`. Realtime INSERT wake-up + 30-60 s poll. `outbox.ts`: replies the worker originates are enqueued, never sent directly. |
 | `src/inbound/` | `InboundPipeline` (status posts, contacts, sender guard, media → Storage, `ingest_inbound`, routing), `RelayChannel` (Debouncer, presence, transcription, restart recovery, `worker_create_relay_batch`, late transcripts → `worker_relay_transcript_followup`), `StatusReplies` (status-reply automations). |
 | `src/transcribe/` | `LocalTranscriber` (unix socket), `SonioxTranscriber` (only constructed with `SONIOX_ENABLED=true` **and** a key). |
 | `src/heartbeat/` | `record_heartbeat` every 60 s; `LogShipper` (pino → stdout + batched `worker_log`, already redacted). |
@@ -110,5 +110,3 @@ network, no sockets, fictitious numbers.
 - No Storage bucket/policy for `gateway_worker` exists in the migrations yet: media upload/download
   fails (logged as `media_store_failed`) until a private `media` bucket with worker insert/select
   policies is created.
-- `BaileysSession.sendMessage` cannot take a pre-generated message id, so the optional
-  `job_reserve_provider_id` step (RL2 crash window between send and `complete_job`) is not used.

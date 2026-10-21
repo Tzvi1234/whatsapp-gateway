@@ -5,7 +5,7 @@
  * Policy (`assertChatAllowed`, use cases, may_initiate) runs BEFORE this, in the worker send path.
  */
 import path from 'node:path';
-import type { AnyMessageContent } from 'baileys';
+import { generateMessageIDV2, type AnyMessageContent } from 'baileys';
 import {
   BAILEYS_CAPABILITIES,
   gatewayError,
@@ -40,9 +40,18 @@ export interface ProviderSession {
   sendMessage(
     jid: string,
     content: AnyMessageContent,
-    opts?: { quotedId?: string },
+    opts?: { quotedId?: string; messageId?: string },
   ): Promise<{ id: string }>;
-  react(jid: string, targetId: string, emoji: string): Promise<{ id: string }>;
+  react(
+    jid: string,
+    targetId: string,
+    emoji: string,
+    opts?: { messageId?: string },
+  ): Promise<{ id: string }>;
+  /** Pre-generated message id for RL2 (optional: falls back to Baileys' generator). */
+  newMessageId?(): string;
+  /** Whether this device recorded a send with this id (RL2 reclaim check). */
+  wasSent?(id: string): Promise<boolean>;
   markRead(chat: string, ids: readonly string[]): Promise<void>;
   presence(chat: string, p: Presence): Promise<void>;
 }
@@ -189,7 +198,30 @@ export class BaileysProvider implements WhatsAppProvider {
     return s;
   }
 
-  async send(msg: OutboundMessage): Promise<SendResult> {
+  /** A message id to reserve before sending (RL2). */
+  newMessageId(accountId: string): string {
+    return this.session(accountId)?.newMessageId?.() ?? generateMessageIDV2();
+  }
+
+  /**
+   * RL2 reclaim check: was a message with this id already sent from this account's device?
+   * null = cannot tell (no session registered on this worker / store unavailable).
+   */
+  async wasSent(accountId: string, id: string): Promise<boolean | null> {
+    const s = this.session(accountId);
+    if (!s?.wasSent) return null;
+    try {
+      return await s.wasSent(id);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * `opts.messageId`: send with this (reserved) id instead of a generated one, so a retry of the
+   * same job after a crash is the same WhatsApp message (deduped by id), never a second one.
+   */
+  async send(msg: OutboundMessage, opts: { messageId?: string } = {}): Promise<SendResult> {
     const log = this.#log.child({ account: hashId(msg.accountId) });
     try {
       const caps = this.capabilities(msg.accountId);
@@ -274,14 +306,15 @@ export class BaileysProvider implements WhatsAppProvider {
 
       // ---- send
       let sent: { id: string };
+      const idOpt: { messageId?: string } = opts.messageId ? { messageId: opts.messageId } : {};
       if (msg.kind === 'reaction') {
-        sent = await session.react(jid, msg.reaction!.targetProviderId, msg.reaction!.emoji);
+        sent = await session.react(jid, msg.reaction!.targetProviderId, msg.reaction!.emoji, idOpt);
       } else {
         if (msg.kind === 'media') {
           const data = await this.#opts.resolveMedia!(msg.media!, msg.accountId);
           content = mediaContent(msg.media!, data);
         }
-        const o: { quotedId?: string } = {};
+        const o: { quotedId?: string; messageId?: string } = { ...idOpt };
         if (msg.quotedProviderId) o.quotedId = msg.quotedProviderId;
         sent = await session.sendMessage(jid, content!, o);
       }

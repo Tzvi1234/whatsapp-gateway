@@ -8,6 +8,7 @@
  */
 import {
   downloadMediaMessage,
+  generateMessageIDV2,
   isLidUser,
   isPnUser,
   jidNormalizedUser,
@@ -594,15 +595,33 @@ export class BaileysSession {
 
   // ------------------------------------------------------------------ public actions
 
-  /** Sends any Baileys content. Records the message for `getMessage` retries. */
+  /**
+   * A fresh WhatsApp message id (same generator Baileys uses). Reserve it in the DB
+   * (`job_reserve_provider_id`) and pass it as `messageId` so a crash between send and commit
+   * never causes a second, different message (RL2): a resend with the same id is deduped.
+   */
+  newMessageId(): string {
+    return generateMessageIDV2(this.#sock?.user?.id);
+  }
+
+  /** True when this device recorded a send with this id (the store's sent-message record). */
+  async wasSent(id: string): Promise<boolean> {
+    return Boolean(await this.#store.getSentMessage(id));
+  }
+
+  /**
+   * Sends any Baileys content. Records the message for `getMessage` retries. `messageId`
+   * overrides the generated id (Baileys `MiscMessageGenerationOptions.messageId`).
+   */
   async sendMessage(
     jid: string,
     content: AnyMessageContent,
-    opts: { quotedId?: string } = {},
+    opts: { quotedId?: string; messageId?: string } = {},
   ): Promise<{ id: string; message: WAMessage }> {
     const sock = this.#requireOpen();
     await this.#ensureGroupCached(sock, jid);
     const misc: MiscMessageGenerationOptions = {};
+    if (opts.messageId) misc.messageId = opts.messageId;
     if (opts.quotedId) misc.quoted = await this.#quoted(jid, opts.quotedId);
     const sent = await sock.sendMessage(jid, content, misc);
     if (!sent?.key.id) throw new Error('send_returned_no_id');
@@ -617,11 +636,11 @@ export class BaileysSession {
     return { id: sent.key.id, message: sent };
   }
 
-  sendText(jid: string, text: string, opts: { quotedId?: string } = {}) {
+  sendText(jid: string, text: string, opts: { quotedId?: string; messageId?: string } = {}) {
     return this.sendMessage(jid, { text }, opts);
   }
 
-  async react(jid: string, targetId: string, emoji: string) {
+  async react(jid: string, targetId: string, emoji: string, opts: { messageId?: string } = {}) {
     const inbound = this.#inbound.get(targetId);
     const key: WAMessageKey = inbound
       ? inbound.key
@@ -630,7 +649,7 @@ export class BaileysSession {
           id: targetId,
           fromMe: Boolean(await this.#store.getSentMessage(targetId)),
         };
-    return this.sendMessage(jid, { react: { text: emoji, key } });
+    return this.sendMessage(jid, { react: { text: emoji, key } }, opts);
   }
 
   async markRead(chat: string, ids: readonly string[]): Promise<void> {
